@@ -1,0 +1,311 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>cb</title>
+<style>
+  :root {
+    --bg: #ffffff;
+    --fg: #111111;
+    --divider: rgba(0, 0, 0, 0.08);
+    --caret: #111111;
+  }
+
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --bg: #0a0a0a;
+      --fg: #eaeaea;
+      --divider: rgba(255, 255, 255, 0.10);
+      --caret: #eaeaea;
+    }
+  }
+
+  * { box-sizing: border-box; }
+
+  html, body {
+    height: 100%;
+    margin: 0;
+    background: var(--bg);
+    overflow: hidden;
+  }
+
+  #fields {
+    height: 100vh;
+    width: 100vw;
+    display: flex;
+    flex-direction: column;
+  }
+
+  textarea {
+    flex: 1 0 auto;
+    min-height: 96px;
+    width: 100%;
+    resize: none;
+    border: none;
+    outline: none;
+    background: transparent;
+    color: var(--fg);
+    caret-color: var(--caret);
+    font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+    font-size: 16px;
+    line-height: 1.6;
+    padding: 20px;
+    border-bottom: 1px solid var(--divider);
+  }
+
+  textarea:last-child {
+    border-bottom: none;
+  }
+
+  #overlay {
+    position: fixed;
+    inset: 0;
+    background: var(--bg);
+    display: none;
+    z-index: 999;
+  }
+
+  #lock {
+    position: fixed;
+    inset: 0;
+    background: var(--bg);
+    display: flex;
+    flex-direction: column;
+    z-index: 1000;
+  }
+
+  #lock textarea {
+    flex: 1 0 auto;
+    min-height: 96px;
+    width: 100%;
+    resize: none;
+    border: none;
+    outline: none;
+    background: transparent;
+    color: var(--fg);
+    caret-color: var(--caret);
+    font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+    font-size: 16px;
+    line-height: 1.6;
+    padding: 20px;
+  }
+</style>
+</head>
+<body>
+
+<div id="fields"></div>
+<div id="overlay"></div>
+<div id="lock">
+  <textarea id="pinInput" autocomplete="off" spellcheck="false"></textarea>
+</div>
+
+<script>
+/*
+  cb, a clean shared clipboard for static hosting on GitHub Pages.
+
+  There is no server in this repository. Cross device sync runs through
+  ntfy.sh, a free public push service with no signup. Every browser that
+  loads this page publishes and listens on the same fixed topic name, so
+  a phone and a desktop visiting the same URL share the same fields.
+
+  Anyone who knows the topic name below can read or write this pad, since
+  ntfy topics are not private unless self hosted with auth. Treat this as
+  a convenience tool, not a place for sensitive text.
+*/
+
+const TOPIC = 'cb-chromiez-clip-239f88cdca46';
+const NTFY_BASE = 'https://ntfy.sh/' + TOPIC;
+
+const container = document.getElementById('fields');
+const overlay = document.getElementById('overlay');
+
+let state = [''];
+let elements = [];
+let suppressPublish = false;
+let publishTimer = null;
+let pendingRemote = null;
+
+function createFieldEl(value) {
+  const el = document.createElement('textarea');
+  el.value = value;
+  el.setAttribute('autocomplete', 'off');
+  el.setAttribute('autocapitalize', 'off');
+  el.setAttribute('spellcheck', 'false');
+  el.addEventListener('input', () => handleInput(el));
+  el.addEventListener('blur', maybeApplyPendingRemote);
+  return el;
+}
+
+function renderAll() {
+  container.innerHTML = '';
+  elements = state.map(value => {
+    const el = createFieldEl(value);
+    container.appendChild(el);
+    return el;
+  });
+}
+
+function handleInput(el) {
+  const idx = elements.indexOf(el);
+  if (idx === -1) return;
+  const value = el.value;
+  state[idx] = value;
+
+  if (value === '' && idx !== elements.length - 1) {
+    elements.splice(idx, 1);
+    state.splice(idx, 1);
+    el.remove();
+  } else if (value !== '' && idx === elements.length - 1) {
+    const newEl = createFieldEl('');
+    elements.push(newEl);
+    state.push('');
+    container.appendChild(newEl);
+  }
+
+  schedulePublish();
+}
+
+function schedulePublish() {
+  clearTimeout(publishTimer);
+  publishTimer = setTimeout(publishState, 450);
+}
+
+async function publishState() {
+  if (suppressPublish) return;
+  try {
+    await fetch(NTFY_BASE, {
+      method: 'POST',
+      body: JSON.stringify(state)
+    });
+  } catch (err) {
+    console.error('Publish failed:', err);
+  }
+}
+
+function anyFieldFocused() {
+  return elements.some(el => el === document.activeElement);
+}
+
+function applyRemoteState(remote) {
+  if (!Array.isArray(remote) || remote.length === 0) remote = [''];
+  if (remote[remote.length - 1] !== '') remote = remote.concat(['']);
+  const same = remote.length === state.length && remote.every((v, i) => v === state[i]);
+  if (same) return;
+  suppressPublish = true;
+  state = remote.slice();
+  renderAll();
+  suppressPublish = false;
+}
+
+function maybeApplyPendingRemote() {
+  setTimeout(() => {
+    if (pendingRemote && !anyFieldFocused()) {
+      const remote = pendingRemote;
+      pendingRemote = null;
+      applyRemoteState(remote);
+    }
+  }, 0);
+}
+
+function onRemoteMessage(raw) {
+  let remote;
+  try {
+    remote = JSON.parse(raw);
+  } catch (err) {
+    return;
+  }
+  if (anyFieldFocused()) {
+    pendingRemote = remote;
+  } else {
+    applyRemoteState(remote);
+  }
+}
+
+let lastMessageId = null;
+let polling = false;
+
+async function poll(sinceLatestOnly) {
+  if (polling) return;
+  polling = true;
+  try {
+    const since = sinceLatestOnly || !lastMessageId ? 'latest' : lastMessageId;
+    const res = await fetch(NTFY_BASE + '/json?poll=1&since=' + since, { cache: 'no-store' });
+    if (res.ok) {
+      const text = await res.text();
+      const lines = text.trim().split('\n').filter(Boolean);
+      for (const line of lines) {
+        let data;
+        try {
+          data = JSON.parse(line);
+        } catch (err) {
+          continue;
+        }
+        if (data && data.id) lastMessageId = data.id;
+        if (data && data.event === 'message' && typeof data.message === 'string') {
+          onRemoteMessage(data.message);
+        }
+      }
+    }
+  } catch (err) {
+    // network hiccup, the next scheduled poll will retry
+  } finally {
+    polling = false;
+  }
+}
+
+let blanked = false;
+document.addEventListener('dblclick', () => {
+  blanked = !blanked;
+  overlay.style.display = blanked ? 'block' : 'none';
+});
+
+function initApp() {
+  renderAll();
+  // Poll on a steady interval, and immediately whenever the tab regains
+  // focus or comes back from the background, since that is exactly when a
+  // phone is most likely to have missed updates.
+  setInterval(() => poll(false), 2500);
+  document.addEventListener('visibilitychange', () => {
+    if (!document.hidden) poll(false);
+  });
+  window.addEventListener('focus', () => poll(false));
+  window.addEventListener('pageshow', () => poll(false));
+  poll(true);
+}
+
+/*
+  Passcode gate. This is a screen lock, not real security: the page is
+  static and the check runs in the visitor's own browser. Only a SHA-256
+  hash of the passcode lives in this file, not the passcode itself, and
+  the field looks and behaves exactly like the real clipboard fields, so
+  nothing on the page signals that a check is happening at all. Someone
+  who actually wants in, rather than just glancing at the page, can still
+  find their way past this, a static site cannot truly stop that.
+*/
+const PIN_HASH = '4fc82b26aecb47d2868c4efbe3581732a3e7cbcc6c2efb32062c08170a05eeb8';
+const lock = document.getElementById('lock');
+const pinInput = document.getElementById('pinInput');
+
+async function sha256Hex(text) {
+  const bytes = new TextEncoder().encode(text);
+  const hashBuffer = await crypto.subtle.digest('SHA-256', bytes);
+  return Array.from(new Uint8Array(hashBuffer))
+    .map(b => b.toString(16).padStart(2, '0'))
+    .join('');
+}
+
+pinInput.addEventListener('input', async () => {
+  const hash = await sha256Hex(pinInput.value);
+  if (hash === PIN_HASH) {
+    lock.style.display = 'none';
+    pinInput.blur();
+    initApp();
+  }
+});
+
+pinInput.focus();
+</script>
+
+</body>
+</html>
