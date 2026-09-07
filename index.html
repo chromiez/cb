@@ -1,0 +1,922 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>cb</title>
+
+<style>
+  :root {
+    --bg: #ffffff;
+    --field-bg: #f1f1f1;
+    --fg: #111111;
+    --caret: #111111;
+  }
+
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --bg: #0a0a0a;
+      --field-bg: #161616;
+      --fg: #eaeaea;
+      --caret: #eaeaea;
+    }
+  }
+
+  * {
+    box-sizing: border-box;
+    touch-action: manipulation;
+  }
+
+  html, body {
+    height: 100%;
+    margin: 0;
+    background: var(--bg);
+    overflow: hidden;
+  }
+
+  #fields {
+    height: 100vh;
+    width: 100vw;
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
+    padding: 78px 10px 10px 10px;
+    overflow-y: auto;
+  }
+
+  .field-wrap {
+    flex: 1 0 auto;
+    min-height: 108px;
+    width: 100%;
+    display: flex;
+    flex-direction: column;
+    background: var(--field-bg);
+    border-radius: 14px;
+    overflow: hidden;
+  }
+
+  .field-label {
+    text-align: left;
+    font-size: 11px;
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+    color: var(--fg);
+    opacity: 0.45;
+    padding: 8px 0 2px 20px;
+    user-select: none;
+    pointer-events: none;
+  }
+
+  .field-wrap textarea {
+    flex: 1 0 auto;
+    width: 100%;
+    resize: none;
+    border: none;
+    outline: none;
+    background: transparent;
+    color: var(--fg);
+    caret-color: var(--caret);
+    font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+    font-size: 16px;
+    line-height: 1.6;
+    padding: 0 20px 20px 20px;
+  }
+
+  #lock {
+    position: fixed;
+    inset: 0;
+    background: var(--bg);
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
+    padding: 10px;
+    z-index: 1000;
+  }
+
+  #lock textarea {
+    flex: 1 0 auto;
+    min-height: 96px;
+    width: 100%;
+    resize: none;
+    border: none;
+    outline: none;
+    background: var(--bg);
+    color: var(--fg);
+    caret-color: var(--caret);
+    font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+    font-size: 16px;
+    line-height: 1.6;
+    padding: 20px;
+  }
+
+  #saveBtn {
+    position: fixed;
+    left: 16px;
+    top: 16px;
+    width: 52px;
+    height: 52px;
+    border: none;
+    border-radius: 50%;
+    background: var(--field-bg);
+    color: var(--fg);
+    display: none;
+    align-items: center;
+    justify-content: center;
+    cursor: pointer;
+    z-index: 500;
+    box-shadow: 0 2px 10px rgba(0, 0, 0, 0.18);
+    transition: transform 0.15s ease;
+  }
+
+  #saveBtn:active {
+    transform: scale(0.9);
+  }
+
+  #saveBtn.pulse {
+    animation: pulse 0.35s ease;
+  }
+
+  #saveBtn.saved {
+    background: #2f9e5c;
+    color: #ffffff;
+  }
+
+  @keyframes pulse {
+    0% { transform: scale(1); }
+    50% { transform: scale(1.18); }
+    100% { transform: scale(1); }
+  }
+
+  #galleryBtn {
+    position: fixed;
+    right: 16px;
+    top: 16px;
+    width: 52px;
+    height: 52px;
+    border: none;
+    border-radius: 50%;
+    background: var(--field-bg);
+    color: var(--fg);
+    display: none;
+    align-items: center;
+    justify-content: center;
+    cursor: pointer;
+    z-index: 500;
+    box-shadow: 0 2px 10px rgba(0, 0, 0, 0.18);
+    transition: transform 0.15s ease;
+  }
+
+  #galleryBtn:active {
+    transform: scale(0.9);
+  }
+
+  #galleryBtn.pulse {
+    animation: pulse 0.35s ease;
+  }
+
+  #galleryOverlay {
+    position: fixed;
+    inset: 0;
+    background: var(--bg);
+    display: none;
+    flex-direction: column;
+    z-index: 900;
+  }
+
+  #galleryOverlay.open {
+    display: flex;
+  }
+
+  #galleryHeader {
+    flex: 0 0 auto;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 16px;
+  }
+
+  .gallery-header-btn {
+    width: 40px;
+    height: 40px;
+    border: none;
+    border-radius: 50%;
+    background: var(--field-bg);
+    color: var(--fg);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    cursor: pointer;
+    font-size: 20px;
+    line-height: 1;
+  }
+
+  .gallery-header-btn:active {
+    transform: scale(0.9);
+  }
+
+  #galleryEmpty {
+    flex: 1 0 auto;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    color: var(--fg);
+    opacity: 0.4;
+    font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+    font-size: 14px;
+    text-align: center;
+    padding: 20px;
+  }
+
+  #galleryGrid {
+    flex: 1 1 auto;
+    overflow-y: auto;
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(96px, 1fr));
+    gap: 8px;
+    padding: 0 16px 16px 16px;
+  }
+
+  .gallery-item {
+    display: flex;
+    flex-direction: column;
+    border-radius: 10px;
+    overflow: hidden;
+    background: var(--field-bg);
+    cursor: pointer;
+  }
+
+  .gallery-item-label {
+    font-size: 11px;
+    letter-spacing: 0.05em;
+    text-transform: uppercase;
+    color: var(--fg);
+    opacity: 0.5;
+    padding: 6px 8px 4px 8px;
+    font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+    user-select: none;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
+
+  .gallery-item-image-wrap {
+    position: relative;
+    flex: 1 1 auto;
+    aspect-ratio: 1 / 1;
+  }
+
+  .gallery-item-image-wrap img {
+    width: 100%;
+    height: 100%;
+    object-fit: cover;
+    display: block;
+  }
+
+  .gallery-item-delete {
+    position: absolute;
+    top: 4px;
+    right: 4px;
+    width: 24px;
+    height: 24px;
+    border: none;
+    border-radius: 50%;
+    background: rgba(0, 0, 0, 0.55);
+    color: #ffffff;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    cursor: pointer;
+    font-size: 14px;
+    line-height: 1;
+  }
+
+  #lightbox {
+    position: fixed;
+    inset: 0;
+    background: rgba(0, 0, 0, 0.85);
+    display: none;
+    align-items: center;
+    justify-content: center;
+    z-index: 950;
+    padding: 40px 16px;
+  }
+
+  #lightbox.open {
+    display: flex;
+  }
+
+  #lightbox img {
+    max-width: 100%;
+    max-height: 100%;
+    border-radius: 10px;
+    object-fit: contain;
+  }
+
+  #lightboxCloseBtn {
+    position: fixed;
+    top: 16px;
+    right: 16px;
+    width: 40px;
+    height: 40px;
+    border: none;
+    border-radius: 50%;
+    background: rgba(255, 255, 255, 0.15);
+    color: #ffffff;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    cursor: pointer;
+    font-size: 20px;
+    line-height: 1;
+  }
+</style>
+</head>
+
+<body>
+
+<div id="fields"></div>
+
+<div id="lock">
+  <textarea id="pinInput" autocomplete="off" spellcheck="false"></textarea>
+</div>
+
+<button id="saveBtn" type="button" aria-label="Save">
+  <svg
+    viewBox="0 0 24 24"
+    width="22"
+    height="22"
+    fill="none"
+    stroke="currentColor"
+    stroke-width="2.2"
+    stroke-linecap="round"
+    stroke-linejoin="round"
+  >
+    <path d="M5 12l4 4L19 6"/>
+  </svg>
+</button>
+
+<button id="galleryBtn" type="button" aria-label="Gallery">
+  <svg
+    viewBox="0 0 24 24"
+    width="22"
+    height="22"
+    fill="none"
+    stroke="currentColor"
+    stroke-width="2.2"
+    stroke-linecap="round"
+    stroke-linejoin="round"
+  >
+    <rect x="3" y="3" width="18" height="18" rx="3"/>
+    <circle cx="8.5" cy="8.5" r="1.5"/>
+    <path d="M21 15l-5-5L5 21"/>
+  </svg>
+</button>
+
+<div id="galleryOverlay">
+  <div id="galleryHeader">
+    <button id="galleryCloseBtn" class="gallery-header-btn" type="button" aria-label="Close gallery">&times;</button>
+    <button id="galleryAddBtn" class="gallery-header-btn" type="button" aria-label="Add image">+</button>
+  </div>
+  <input id="galleryAddInput" type="file" accept="image/*" style="display:none">
+  <div id="galleryEmpty">No pasted images yet</div>
+  <div id="galleryGrid"></div>
+</div>
+
+<div id="lightbox">
+  <button id="lightboxCloseBtn" type="button" aria-label="Close">&times;</button>
+  <img id="lightboxImg" alt="">
+</div>
+
+<script type="module">
+import {
+  initializeApp
+} from 'https://www.gstatic.com/firebasejs/12.17.1/firebase-app.js';
+
+import {
+  getDatabase,
+  ref as dbRef,
+  set,
+  onValue
+} from 'https://www.gstatic.com/firebasejs/12.17.1/firebase-database.js';
+
+import {
+  getStorage,
+  ref as storageRef,
+  uploadBytes,
+  getDownloadURL,
+  deleteObject
+} from 'https://www.gstatic.com/firebasejs/12.17.1/firebase-storage.js';
+
+const firebaseApp = initializeApp({
+  databaseURL: 'https://rtcb-81402-default-rtdb.firebaseio.com',
+  storageBucket: 'rtcb-81402.firebasestorage.app'
+});
+
+const db = getDatabase(firebaseApp);
+const storage = getStorage(firebaseApp);
+const clipRef = dbRef(db, 'cb');
+const galleryDbRef = dbRef(db, 'gallery');
+
+const container = document.getElementById('fields');
+const saveBtn = document.getElementById('saveBtn');
+
+let state = [''];
+let elements = [];
+let wraps = [];
+
+let pendingRemote = null;
+
+let lastSavedSnapshot = JSON.stringify(['']);
+
+function createField(value) {
+  const wrap = document.createElement('div');
+  wrap.className = 'field-wrap';
+
+  const label = document.createElement('div');
+  label.className = 'field-label';
+  wrap.appendChild(label);
+
+  const el = document.createElement('textarea');
+  el.value = value;
+  el.setAttribute('autocomplete', 'off');
+  el.setAttribute('autocapitalize', 'off');
+  el.setAttribute('spellcheck', 'false');
+
+  el.addEventListener('input', (event) => handleInput(el, event));
+  el.addEventListener('blur', maybeApplyPendingRemote);
+  el.addEventListener('paste', handleFieldPaste);
+
+  wrap.appendChild(el);
+
+  return { wrap, el };
+}
+
+function updateLabels() {
+  wraps.forEach((wrap, i) => {
+    wrap.querySelector('.field-label').textContent = 'cb ' + (i + 1);
+  });
+}
+
+function renderAll() {
+  container.innerHTML = '';
+  elements = [];
+  wraps = [];
+
+  state.forEach(value => {
+    const { wrap, el } = createField(value);
+    elements.push(el);
+    wraps.push(wrap);
+    container.appendChild(wrap);
+  });
+
+  updateLabels();
+}
+
+function handleInput(el, event) {
+  const idx = elements.indexOf(el);
+
+  if (idx === -1) return;
+
+  const value = el.value;
+  state[idx] = value;
+
+  if (value === '' && idx !== elements.length - 1) {
+    elements.splice(idx, 1);
+    state.splice(idx, 1);
+    const wrap = wraps.splice(idx, 1)[0];
+    wrap.remove();
+    updateLabels();
+
+    if (elements[idx]) {
+      elements[idx].focus();
+    } else if (elements.length > 0) {
+      elements[elements.length - 1].focus();
+    }
+
+  } else if (value !== '' && idx === elements.length - 1) {
+    const { wrap, el: newEl } = createField('');
+    elements.push(newEl);
+    state.push('');
+    wraps.push(wrap);
+    container.appendChild(wrap);
+    updateLabels();
+  }
+
+  updateSaveIndicator();
+
+  if (event && event.inputType === 'insertLineBreak') {
+    save();
+  }
+}
+
+async function save() {
+  const payload = JSON.stringify(state);
+
+  if (payload === lastSavedSnapshot) {
+    return;
+  }
+
+  try {
+    await set(clipRef, state);
+
+    lastSavedSnapshot = payload;
+
+    pendingRemote = null;
+
+    updateSaveIndicator();
+    flashSaved();
+
+  } catch (err) {
+    console.error('Save failed:', err);
+    updateSaveIndicator();
+  }
+}
+
+function updateSaveIndicator() {
+  const isSaved =
+    JSON.stringify(state) === lastSavedSnapshot;
+
+  saveBtn.classList.toggle('saved', isSaved);
+}
+
+function flashSaved() {
+  saveBtn.classList.remove('pulse');
+
+  void saveBtn.offsetWidth;
+
+  saveBtn.classList.add('pulse');
+}
+
+const galleryBtn = document.getElementById('galleryBtn');
+const galleryOverlay = document.getElementById('galleryOverlay');
+const galleryGrid = document.getElementById('galleryGrid');
+const galleryEmpty = document.getElementById('galleryEmpty');
+const galleryCloseBtn = document.getElementById('galleryCloseBtn');
+const galleryAddBtn = document.getElementById('galleryAddBtn');
+const galleryAddInput = document.getElementById('galleryAddInput');
+const lightbox = document.getElementById('lightbox');
+const lightboxImg = document.getElementById('lightboxImg');
+const lightboxCloseBtn = document.getElementById('lightboxCloseBtn');
+
+let galleryImages = {};
+
+function flashGalleryButton() {
+  galleryBtn.classList.remove('pulse');
+  void galleryBtn.offsetWidth;
+  galleryBtn.classList.add('pulse');
+}
+
+function renderGallery() {
+  const allEntries = Object.entries(galleryImages || {});
+
+  const orderById = {};
+  allEntries
+    .slice()
+    .sort((a, b) => (a[1] && a[1].ts || 0) - (b[1] && b[1].ts || 0))
+    .forEach(([id], idx) => {
+      orderById[id] = idx + 1;
+    });
+
+  const entries = allEntries
+    .sort((a, b) => (b[1] && b[1].ts || 0) - (a[1] && a[1].ts || 0));
+
+  galleryGrid.innerHTML = '';
+  galleryEmpty.style.display = entries.length === 0 ? 'flex' : 'none';
+  galleryGrid.style.display = entries.length === 0 ? 'none' : 'grid';
+
+  entries.forEach(([id, data]) => {
+    if (!data || !data.url) return;
+
+    const labelText = 'Image ' + orderById[id];
+
+    const item = document.createElement('div');
+    item.className = 'gallery-item';
+
+    const label = document.createElement('div');
+    label.className = 'gallery-item-label';
+    label.textContent = labelText;
+    item.appendChild(label);
+
+    const imageWrap = document.createElement('div');
+    imageWrap.className = 'gallery-item-image-wrap';
+
+    const img = document.createElement('img');
+    img.src = data.url;
+    img.loading = 'lazy';
+    img.alt = labelText;
+    img.addEventListener('click', () => openLightbox(data.url, labelText));
+    imageWrap.appendChild(img);
+
+    const delBtn = document.createElement('button');
+    delBtn.className = 'gallery-item-delete';
+    delBtn.type = 'button';
+    delBtn.setAttribute('aria-label', 'Delete ' + labelText);
+    delBtn.textContent = '\u00d7';
+    delBtn.addEventListener('click', (event) => {
+      event.stopPropagation();
+      const confirmed = window.confirm(labelText + ' will be permanently deleted. Continue?');
+      if (confirmed) {
+        deleteGalleryImage(id, data.path);
+      }
+    });
+    imageWrap.appendChild(delBtn);
+
+    item.appendChild(imageWrap);
+    galleryGrid.appendChild(item);
+  });
+}
+
+function openLightbox(url, labelText) {
+  lightboxImg.src = url;
+  lightboxImg.alt = labelText || '';
+  lightbox.classList.add('open');
+}
+
+function closeLightbox() {
+  lightbox.classList.remove('open');
+  lightboxImg.src = '';
+}
+
+function openGallery() {
+  galleryOverlay.classList.add('open');
+}
+
+function closeGallery() {
+  galleryOverlay.classList.remove('open');
+  closeLightbox();
+}
+
+async function uploadImageToGallery(file) {
+  if (!file || !file.type || !file.type.startsWith('image/')) return;
+
+  try {
+    const id = Date.now().toString(36) + Math.random().toString(36).slice(2, 8);
+    const ext = (file.type.split('/')[1] || 'png').split('+')[0];
+    const path = 'gallery/' + id + '.' + ext;
+    const fileRef = storageRef(storage, path);
+
+    await uploadBytes(fileRef, file);
+    const url = await getDownloadURL(fileRef);
+
+    await set(dbRef(db, 'gallery/' + id), {
+      url: url,
+      path: path,
+      ts: Date.now()
+    });
+
+    flashGalleryButton();
+
+  } catch (err) {
+    console.error('Image upload failed:', err);
+  }
+}
+
+async function deleteGalleryImage(id, path) {
+  try {
+    if (path) {
+      await deleteObject(storageRef(storage, path));
+    }
+  } catch (err) {
+    console.error('Storage delete failed:', err);
+  }
+
+  try {
+    await set(dbRef(db, 'gallery/' + id), null);
+  } catch (err) {
+    console.error('Gallery entry delete failed:', err);
+  }
+}
+
+function handleFieldPaste(event) {
+  const items = event.clipboardData && event.clipboardData.items;
+  if (!items) return;
+
+  let imageFile = null;
+
+  for (const item of items) {
+    if (item.type && item.type.startsWith('image/')) {
+      imageFile = item.getAsFile();
+      break;
+    }
+  }
+
+  if (!imageFile) return;
+
+  event.preventDefault();
+  uploadImageToGallery(imageFile);
+}
+
+function startGalleryListening() {
+  onValue(galleryDbRef, (snapshot) => {
+    galleryImages = snapshot.val() || {};
+    renderGallery();
+  });
+}
+
+galleryBtn.addEventListener('click', openGallery);
+galleryCloseBtn.addEventListener('click', closeGallery);
+lightboxCloseBtn.addEventListener('click', closeLightbox);
+lightbox.addEventListener('click', (event) => {
+  if (event.target === lightbox) closeLightbox();
+});
+galleryAddBtn.addEventListener('click', () => galleryAddInput.click());
+galleryAddInput.addEventListener('change', () => {
+  const file = galleryAddInput.files[0];
+  if (file) uploadImageToGallery(file);
+  galleryAddInput.value = '';
+});
+
+const REST_ENDPOINT =
+  'https://rtcb-81402-default-rtdb.firebaseio.com/cb.json';
+
+function flushPendingSaveOnExit() {
+  const payload = JSON.stringify(state);
+
+  if (payload === lastSavedSnapshot) {
+    return;
+  }
+
+  try {
+    fetch(REST_ENDPOINT, {
+      method: 'PUT',
+      body: payload,
+      keepalive: true
+    });
+
+    lastSavedSnapshot = payload;
+
+  } catch (err) {
+    console.error('Exit save failed:', err);
+  }
+}
+
+document.addEventListener('visibilitychange', () => {
+  if (document.hidden) {
+    flushPendingSaveOnExit();
+  }
+});
+
+window.addEventListener('pagehide', flushPendingSaveOnExit);
+
+function anyFieldFocused() {
+  return elements.some(el => el === document.activeElement);
+}
+
+function applyRemoteState(remote) {
+  if (!Array.isArray(remote) || remote.length === 0) {
+    remote = [''];
+  }
+
+  if (remote[remote.length - 1] !== '') {
+    remote = remote.concat(['']);
+  }
+
+  const same =
+    remote.length === state.length &&
+    remote.every((value, index) => value === state[index]);
+
+  if (same) {
+    return;
+  }
+
+  state = remote.slice();
+
+  renderAll();
+
+  lastSavedSnapshot = JSON.stringify(state);
+
+  updateSaveIndicator();
+}
+
+function maybeApplyPendingRemote() {
+  setTimeout(() => {
+    if (pendingRemote && !anyFieldFocused()) {
+      const remote = pendingRemote;
+
+      pendingRemote = null;
+
+      applyRemoteState(remote);
+    }
+  }, 0);
+}
+
+function normalizeRemote(val) {
+  if (Array.isArray(val)) {
+    return val;
+  }
+
+  if (val && typeof val === 'object') {
+    return Object.keys(val)
+      .sort((a, b) => Number(a) - Number(b))
+      .map(key => val[key]);
+  }
+
+  return [''];
+}
+
+let hasFocusedReadyField = false;
+
+function focusReadyField() {
+  if (elements.length === 0) return;
+  const last = elements[elements.length - 1];
+  last.focus();
+  const len = last.value.length;
+  try {
+    last.setSelectionRange(len, len);
+  } catch (err) {
+  }
+}
+
+function startListening() {
+  onValue(clipRef, (snapshot) => {
+    const remote = normalizeRemote(snapshot.val());
+
+    const remoteSnapshot = JSON.stringify(
+      Array.isArray(remote) && remote.length > 0
+        ? (remote[remote.length - 1] === ''
+            ? remote
+            : remote.concat(['']))
+        : ['']
+    );
+
+    const localIsDirty =
+      JSON.stringify(state) !== lastSavedSnapshot;
+
+    if (!localIsDirty) {
+      pendingRemote = null;
+      applyRemoteState(remote);
+      if (!hasFocusedReadyField) {
+        hasFocusedReadyField = true;
+        setTimeout(focusReadyField, 0);
+      }
+      return;
+    }
+
+    pendingRemote = remote;
+
+    if (!hasFocusedReadyField) {
+      hasFocusedReadyField = true;
+      setTimeout(focusReadyField, 0);
+    }
+  });
+}
+
+function initApp() {
+  renderAll();
+
+  startListening();
+  startGalleryListening();
+
+  saveBtn.style.display = 'flex';
+  galleryBtn.style.display = 'flex';
+
+  updateSaveIndicator();
+
+  saveBtn.addEventListener('click', save);
+
+  document.addEventListener('keydown', (event) => {
+    const key = event.key.toLowerCase();
+
+    if ((event.ctrlKey || event.metaKey) && key === 's') {
+      event.preventDefault();
+      save();
+    } else if (event.key === 'Enter') {
+      save();
+    }
+  });
+}
+
+const PIN_HASH =
+  'f98204ba6963009734f0398a80f8e44f9d3ef74ebb9c49e5d4f000bd1c102d29';
+
+const lock = document.getElementById('lock');
+const pinInput = document.getElementById('pinInput');
+
+async function sha256Hex(text) {
+  const bytes = new TextEncoder().encode(text);
+
+  const hashBuffer =
+    await crypto.subtle.digest('SHA-256', bytes);
+
+  return Array.from(new Uint8Array(hashBuffer))
+    .map(b => b.toString(16).padStart(2, '0'))
+    .join('');
+}
+
+pinInput.addEventListener('input', async () => {
+  const hash = await sha256Hex(pinInput.value);
+
+  if (hash === PIN_HASH) {
+    lock.style.display = 'none';
+
+    pinInput.blur();
+
+    initApp();
+  }
+});
+
+pinInput.focus();
+</script>
+
+</body>
+</html>
