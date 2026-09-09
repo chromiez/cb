@@ -1,0 +1,2880 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>New Incognito Tab</title>
+
+<style>
+  :root {
+    --bg: #ffffff;
+    --field-bg: #f1f1f1;
+    --fg: #111111;
+    --caret: #111111;
+  }
+
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --bg: #0a0a0a;
+      --field-bg: #161616;
+      --fg: #eaeaea;
+      --caret: #eaeaea;
+    }
+  }
+
+  * {
+    box-sizing: border-box;
+    touch-action: manipulation;
+  }
+
+  html, body {
+    height: 100%;
+    margin: 0;
+    background: var(--bg);
+    overflow: hidden;
+  }
+
+  #fields {
+    height: 100vh;
+    width: 100vw;
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
+    padding: 78px 10px 10px 10px;
+    overflow-y: auto;
+  }
+
+  .field-wrap {
+    flex: 1 0 auto;
+    min-height: 108px;
+    width: 100%;
+    display: flex;
+    flex-direction: column;
+    background: var(--field-bg);
+    border-radius: 14px;
+    overflow: hidden;
+  }
+
+  .field-label {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 10px;
+    text-align: left;
+    font-size: 11px;
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+    color: var(--fg);
+    padding: 6px 14px 2px 20px;
+  }
+
+  .field-label-left {
+    flex: 1 1 auto;
+    min-width: 0;
+    display: flex;
+    align-items: center;
+    gap: 8px;
+  }
+
+  .field-label-text {
+    opacity: 0.45;
+    user-select: none;
+    pointer-events: none;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
+
+  .field-label-actions {
+    flex: 0 0 auto;
+    display: flex;
+    align-items: center;
+    gap: 6px;
+  }
+
+  .field-action-btn {
+    flex: 0 0 auto;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    width: 26px;
+    height: 22px;
+    border: none;
+    border-radius: 6px;
+    background: rgba(127, 127, 127, 0.18);
+    color: var(--fg);
+    opacity: 0.6;
+    cursor: pointer;
+    padding: 0;
+    text-transform: none;
+    letter-spacing: normal;
+    transition: transform 0.12s ease, opacity 0.12s ease, background 0.12s ease;
+  }
+
+  .field-action-btn:active {
+    transform: scale(0.9);
+  }
+
+  .field-action-btn.copied {
+    background: #2f9e5c;
+    color: #ffffff;
+    opacity: 1;
+  }
+
+  .field-delete-btn {
+    background: rgba(224, 69, 63, 0.16);
+    color: #e0453f;
+    opacity: 0.85;
+  }
+
+  .field-delete-btn:active {
+    background: #e0453f;
+    color: #ffffff;
+    opacity: 1;
+  }
+
+  .field-select-checkbox {
+    flex: 0 0 auto;
+    width: 18px;
+    height: 18px;
+    accent-color: #2f9e5c;
+    cursor: pointer;
+  }
+
+  /*
+    The last field is always the empty placeholder waiting for new
+    content, so actions that only make sense on something you've
+    already written (copy, delete, hide, select) have nothing to act
+    on yet. Only paste is kept.
+  */
+  .field-wrap.is-last-field .field-copy-btn,
+  .field-wrap.is-last-field .field-delete-btn,
+  .field-wrap.is-last-field .field-collapse-toggle-btn,
+  .field-wrap.is-last-field .field-select-checkbox {
+    display: none;
+  }
+
+  #fields.with-selection-bar {
+    padding-bottom: 72px;
+  }
+
+  #fieldSelectionBar {
+    position: fixed;
+    left: 0;
+    right: 0;
+    bottom: 0;
+    display: none;
+    align-items: center;
+    gap: 8px;
+    padding: 8px 10px calc(8px + env(safe-area-inset-bottom, 0px)) 12px;
+    background: var(--field-bg);
+    box-shadow: 0 -2px 10px rgba(0, 0, 0, 0.18);
+    z-index: 600;
+    font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+  }
+
+  #fieldSelectionBar.visible {
+    display: flex;
+  }
+
+  #fieldSelectionCount {
+    flex: 0 0 auto;
+    min-width: 16px;
+    font-size: 13px;
+    font-weight: 600;
+    color: var(--fg);
+    opacity: 0.65;
+  }
+
+  /*
+    Icon-only row instead of full-text buttons: six labeled buttons
+    wrapped to two or three lines on a phone-width screen, eating a
+    huge chunk of the viewport the moment a single field got selected.
+    Compact icons fit in one fixed-height row with no wrapping, and
+    still work with a hidden/collapsed field selected -- copying a
+    selection never depended on the field being expanded.
+  */
+  .field-selection-icons {
+    flex: 1 1 auto;
+    display: flex;
+    align-items: center;
+    justify-content: flex-end;
+    gap: 6px;
+    overflow-x: auto;
+    scrollbar-width: none;
+  }
+
+  .field-selection-icons::-webkit-scrollbar {
+    display: none;
+  }
+
+  .field-selection-btn {
+    flex: 0 0 auto;
+    width: 36px;
+    height: 34px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    border: none;
+    border-radius: 8px;
+    background: rgba(127, 127, 127, 0.18);
+    color: var(--fg);
+    opacity: 0.75;
+    cursor: pointer;
+    padding: 0;
+    transition: transform 0.12s ease, opacity 0.12s ease, background 0.12s ease;
+  }
+
+  .field-selection-btn:active {
+    transform: scale(0.92);
+  }
+
+  .field-selection-btn.disabled {
+    opacity: 0.3;
+    pointer-events: none;
+  }
+
+  #fieldHideSelectedBtn {
+    background: #2f6fbf;
+    color: #ffffff;
+    opacity: 1;
+  }
+
+  #fieldUnhideSelectedBtn {
+    background: none;
+    border: 1px solid #2f6fbf;
+    color: #2f6fbf;
+    opacity: 1;
+  }
+
+  #fieldCopySelectedBtn {
+    background: none;
+    border: 1px solid #2f9e5c;
+    color: #2f9e5c;
+    opacity: 1;
+    transition: background 0.15s ease, color 0.15s ease, border-color 0.15s ease, transform 0.12s ease, opacity 0.12s ease;
+  }
+
+  /*
+    Copying works on a hidden field's text too -- nothing about being
+    collapsed stops it -- but that's not obvious at a glance, so a
+    selection that includes a hidden field gets its own amber color
+    on Copy as a reassurance that it's still the button to press.
+  */
+  #fieldCopySelectedBtn.has-hidden:not(.disabled) {
+    background: #c9821c;
+    border-color: #c9821c;
+    color: #ffffff;
+  }
+
+  #fieldCopySelectedBtn.copied {
+    background: #2f9e5c;
+    color: #ffffff;
+  }
+
+  #fieldDeleteSelectedBtn {
+    background: #e0453f;
+    color: #ffffff;
+    opacity: 1;
+  }
+
+  /*
+    Disabled means "not applicable to this selection" (e.g. Unhide
+    when nothing selected is hidden, or Hide when everything selected
+    already is) -- so it drops the button's action color entirely and
+    falls back to the same neutral grey as an inactive icon, instead
+    of just a faded version of its color. Grey = nothing will happen;
+    color = this is a button worth pressing.
+  */
+  #fieldHideSelectedBtn.disabled,
+  #fieldUnhideSelectedBtn.disabled,
+  #fieldCopySelectedBtn.disabled,
+  #fieldDeleteSelectedBtn.disabled {
+    background: rgba(127, 127, 127, 0.18);
+    border: none;
+    color: var(--fg);
+  }
+
+  .field-input {
+    flex: 1 0 auto;
+    width: 100%;
+    resize: none;
+    border: none;
+    outline: none;
+    background: transparent;
+    color: var(--fg);
+    caret-color: var(--caret);
+    font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+    font-size: 16px;
+    line-height: 1.6;
+    padding: 0 20px 20px 20px;
+  }
+
+  .field-input {
+    overflow-y: auto;
+    white-space: pre-wrap;
+    word-wrap: break-word;
+    min-height: 0;
+  }
+
+  .field-wrap.collapsed {
+    flex: 0 0 auto;
+    min-height: auto;
+  }
+
+  .field-wrap.collapsed .field-input {
+    display: none;
+  }
+
+  .field-collapse-toggle-btn.active {
+    background: #2f6fbf;
+    color: #ffffff;
+    opacity: 1;
+  }
+
+  .field-collapse-toggle-btn.active:active {
+    background: #2f6fbf;
+  }
+
+  .inline-image-wrap {
+    position: relative;
+    display: inline-block;
+    max-width: 100%;
+    margin: 6px 0;
+    line-height: 0;
+  }
+
+  .inline-image-wrap img {
+    max-width: 100%;
+    border-radius: 8px;
+    display: block;
+  }
+
+  .inline-image-controls {
+    position: absolute;
+    top: 6px;
+    right: 6px;
+    display: flex;
+    gap: 4px;
+    opacity: 0;
+    transition: opacity 0.12s ease;
+  }
+
+  .inline-image-wrap:hover .inline-image-controls,
+  .inline-image-wrap:focus-within .inline-image-controls {
+    opacity: 1;
+  }
+
+  .inline-image-btn {
+    width: 26px;
+    height: 26px;
+    border: none;
+    border-radius: 6px;
+    background: rgba(0, 0, 0, 0.6);
+    color: #ffffff;
+    font-size: 14px;
+    line-height: 1;
+    cursor: pointer;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+  }
+
+  .inline-image-del {
+    background: rgba(192, 57, 43, 0.85);
+  }
+
+  #lock {
+    position: fixed;
+    inset: 0;
+    background: var(--bg);
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
+    padding: 10px;
+    z-index: 1000;
+  }
+
+  #lock textarea {
+    flex: 1 0 auto;
+    min-height: 96px;
+    width: 100%;
+    resize: none;
+    border: none;
+    outline: none;
+    background: var(--bg);
+    color: var(--fg);
+    caret-color: var(--caret);
+    font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+    font-size: 16px;
+    line-height: 1.6;
+    padding: 20px;
+  }
+
+  #saveBtn {
+    position: fixed;
+    left: 16px;
+    top: 16px;
+    width: 52px;
+    height: 52px;
+    border: none;
+    border-radius: 50%;
+    background: var(--field-bg);
+    color: var(--fg);
+    display: none;
+    align-items: center;
+    justify-content: center;
+    cursor: pointer;
+    z-index: 500;
+    box-shadow: 0 2px 10px rgba(0, 0, 0, 0.18);
+    transition: transform 0.15s ease, background 0.25s ease, color 0.25s ease;
+  }
+
+  #saveBtn:active {
+    transform: scale(0.9);
+  }
+
+  #saveBtn.pulse {
+    animation: pulse 0.35s ease;
+  }
+
+  #saveBtn.saved {
+    background: #2f9e5c;
+    color: #ffffff;
+  }
+
+  #saveBtn.error {
+    background: #c0392b;
+    color: #ffffff;
+    animation: pulse 0.6s ease infinite;
+  }
+
+  @keyframes pulse {
+    0% { transform: scale(1); }
+    50% { transform: scale(1.18); }
+    100% { transform: scale(1); }
+  }
+
+  #galleryBtn {
+    position: fixed;
+    right: 16px;
+    top: 16px;
+    width: 52px;
+    height: 52px;
+    border: none;
+    border-radius: 50%;
+    background: var(--field-bg);
+    color: var(--fg);
+    display: none;
+    align-items: center;
+    justify-content: center;
+    cursor: pointer;
+    z-index: 500;
+    box-shadow: 0 2px 10px rgba(0, 0, 0, 0.18);
+    transition: transform 0.15s ease;
+  }
+
+  #galleryBtn:active {
+    transform: scale(0.9);
+  }
+
+  #galleryBtn.pulse {
+    animation: pulse 0.35s ease;
+  }
+
+  /*
+    Sits immediately to the left of the Files button, same row and
+    size, so it reads as part of the same top-right button group
+    rather than a separate floating control.
+  */
+  #goToFieldBtn {
+    position: fixed;
+    right: 78px;
+    top: 16px;
+    width: 52px;
+    height: 52px;
+    border: none;
+    border-radius: 50%;
+    background: var(--field-bg);
+    color: var(--fg);
+    display: none;
+    align-items: center;
+    justify-content: center;
+    cursor: pointer;
+    z-index: 500;
+    box-shadow: 0 2px 10px rgba(0, 0, 0, 0.18);
+    transition: transform 0.15s ease;
+  }
+
+  #goToFieldBtn:active {
+    transform: scale(0.9);
+  }
+
+  /*
+    Only worth showing while a field long enough to actually need
+    them is focused -- positioned on the right edge, below the
+    corner buttons but high enough to stay above the on-screen
+    keyboard, since that's exactly when you're using them.
+  */
+  #scrollFieldTopBtn,
+  #scrollFirstFieldTopBtn,
+  #hideCurrentFieldBtn,
+  #bookmarkViewBtn,
+  #scrollFieldBottomBtn,
+  #scrollLastFieldBottomBtn {
+    position: fixed;
+    right: 16px;
+    width: 40px;
+    height: 40px;
+    border: none;
+    border-radius: 50%;
+    background: var(--field-bg);
+    color: var(--fg);
+    opacity: 0.5;
+    display: none;
+    align-items: center;
+    justify-content: center;
+    cursor: pointer;
+    z-index: 550;
+    box-shadow: 0 2px 10px rgba(0, 0, 0, 0.18);
+    transition: transform 0.15s ease, opacity 0.15s ease;
+  }
+
+  #scrollFieldTopBtn.visible,
+  #scrollFirstFieldTopBtn.visible,
+  #hideCurrentFieldBtn.visible,
+  #bookmarkViewBtn.visible,
+  #scrollFieldBottomBtn.visible,
+  #scrollLastFieldBottomBtn.visible {
+    display: flex;
+  }
+
+  #scrollFieldTopBtn:active,
+  #scrollFirstFieldTopBtn:active,
+  #hideCurrentFieldBtn:active,
+  #bookmarkViewBtn:active,
+  #scrollFieldBottomBtn:active,
+  #scrollLastFieldBottomBtn:active {
+    transform: scale(0.9);
+    opacity: 0.9;
+  }
+
+  /* Vertical order: very top, top of field, hide, bookmark, bottom of field, very bottom */
+  #scrollFirstFieldTopBtn {
+    top: 84px;
+  }
+
+  #scrollFieldTopBtn {
+    top: 132px;
+  }
+
+  #hideCurrentFieldBtn {
+    top: 180px;
+  }
+
+  /*
+    Signals "tap again to undo" after a hide -- distinct from the
+    button's normal neutral look, and from the disabled state, so an
+    accidental hide is obviously reversible rather than final.
+  */
+  #hideCurrentFieldBtn.armed {
+    background: #2f6fbf;
+    color: #ffffff;
+    opacity: 0.9;
+  }
+
+  #bookmarkViewBtn {
+    top: 228px;
+  }
+
+  /*
+    Signals "a view is bookmarked, tap to jump back to it" -- same
+    treatment as the hide button's armed state, but this one stays
+    armed after use, since returning to a bookmark doesn't consume
+    it the way undoing a hide does.
+  */
+  #bookmarkViewBtn.armed {
+    background: #2f6fbf;
+    color: #ffffff;
+    opacity: 0.9;
+  }
+
+  /*
+    The bookmarked field is currently hidden -- jumping to it doesn't
+    make sense while it's collapsed, so a single tap is a no-op.
+    Dimmed further than the normal armed look to read as "can't jump
+    right now", but pointer-events stay on (unlike the fully disabled
+    selection-bar buttons) since a double-tap is still a valid way to
+    drop this bookmark and set a new one at the current view.
+  */
+  #bookmarkViewBtn.disabled {
+    opacity: 0.35;
+  }
+
+  #bookmarkViewBtn.disabled:active {
+    transform: none;
+  }
+
+  #scrollFieldBottomBtn {
+    top: 276px;
+  }
+
+  #scrollLastFieldBottomBtn {
+    top: 324px;
+  }
+
+
+  #galleryOverlay {
+    position: fixed;
+    inset: 0;
+    background: var(--bg);
+    display: none;
+    flex-direction: column;
+    z-index: 900;
+  }
+
+  #galleryOverlay.open {
+    display: flex;
+  }
+
+  #galleryHeader {
+    flex: 0 0 auto;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 16px;
+  }
+
+  .gallery-header-btn {
+    width: 40px;
+    height: 40px;
+    border: none;
+    border-radius: 50%;
+    background: var(--field-bg);
+    color: var(--fg);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    cursor: pointer;
+    font-size: 20px;
+    line-height: 1;
+  }
+
+  .gallery-header-btn:active {
+    transform: scale(0.9);
+  }
+
+  #galleryAddBtn {
+    background: #2f9e5c;
+    color: #ffffff;
+  }
+
+  #galleryEmpty {
+    flex: 1 0 auto;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    color: var(--fg);
+    opacity: 0.4;
+    font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+    font-size: 14px;
+    text-align: center;
+    padding: 20px;
+  }
+
+  #galleryGrid {
+    flex: 1 1 auto;
+    overflow-y: auto;
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(84px, 1fr));
+    grid-auto-rows: min-content;
+    align-content: start;
+    gap: 8px;
+    padding: 0 16px 16px 16px;
+  }
+
+  .gallery-item {
+    display: flex;
+    flex-direction: column;
+    border-radius: 10px;
+    overflow: hidden;
+    background: var(--field-bg);
+    cursor: pointer;
+  }
+
+  .gallery-item-toprow {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 6px;
+    padding: 6px 8px 4px 8px;
+  }
+
+  .gallery-item-label {
+    font-size: 11px;
+    letter-spacing: 0.05em;
+    text-transform: uppercase;
+    color: var(--fg);
+    opacity: 0.5;
+    font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+    user-select: none;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
+
+  .gallery-item-select {
+    flex: 0 0 auto;
+    width: 18px;
+    height: 18px;
+    accent-color: #2f9e5c;
+    cursor: pointer;
+  }
+
+  .gallery-item-image-wrap {
+    position: relative;
+    flex: 0 0 auto;
+    width: 100%;
+    aspect-ratio: 1 / 1;
+  }
+
+  .gallery-item-image-wrap img {
+    width: 100%;
+    height: 100%;
+    object-fit: cover;
+    display: block;
+  }
+
+  .gallery-item-filename {
+    font-size: 11px;
+    color: var(--fg);
+    opacity: 0.75;
+    padding: 0 8px 6px 8px;
+    font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
+
+  .gallery-item-file-icon {
+    width: 100%;
+    height: 100%;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    background: var(--bg);
+  }
+
+  .gallery-item-file-icon span {
+    font-size: 12px;
+    font-weight: 600;
+    letter-spacing: 0.03em;
+    color: var(--fg);
+    opacity: 0.6;
+    font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+    text-transform: uppercase;
+  }
+
+  .gallery-item-delete {
+    position: absolute;
+    top: 4px;
+    right: 4px;
+    width: 24px;
+    height: 24px;
+    border: none;
+    border-radius: 50%;
+    background: #e0453f;
+    color: #ffffff;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    cursor: pointer;
+    font-size: 14px;
+    line-height: 1;
+  }
+
+  #galleryBulkActions {
+    flex: 0 0 auto;
+    display: none;
+    align-items: center;
+    gap: 16px;
+    padding: 0 16px 10px 16px;
+  }
+
+  #galleryBulkActions.visible {
+    display: flex;
+  }
+
+  #galleryBulkActions button {
+    border: none;
+    background: none;
+    padding: 0;
+    font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+    font-size: 13px;
+    font-weight: 600;
+    color: var(--fg);
+    opacity: 0.6;
+    cursor: pointer;
+  }
+
+  #galleryBulkActions button:active {
+    opacity: 0.9;
+  }
+
+  #gallerySelectionBar {
+    flex: 0 0 auto;
+    display: none;
+    align-items: center;
+    justify-content: space-between;
+    padding: 0 16px 12px 16px;
+    font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+  }
+
+  #gallerySelectionBar.open {
+    display: flex;
+  }
+
+  #gallerySelectionCount {
+    font-size: 13px;
+    color: var(--fg);
+    opacity: 0.7;
+  }
+
+  #galleryDeleteSelectedBtn {
+    border: none;
+    border-radius: 20px;
+    background: #e0453f;
+    color: #ffffff;
+    font-size: 13px;
+    font-weight: 600;
+    padding: 8px 16px;
+    cursor: pointer;
+  }
+
+  #galleryDeleteSelectedBtn:active {
+    transform: scale(0.96);
+  }
+
+  #lightbox {
+    position: fixed;
+    inset: 0;
+    background: rgba(0, 0, 0, 0.85);
+    display: none;
+    align-items: center;
+    justify-content: center;
+    z-index: 950;
+    padding: 40px 16px;
+  }
+
+  #lightbox.open {
+    display: flex;
+  }
+
+  #lightbox img {
+    max-width: 100%;
+    max-height: 100%;
+    border-radius: 10px;
+    object-fit: contain;
+  }
+
+  #lightboxCloseBtn {
+    position: fixed;
+    top: 16px;
+    right: 16px;
+    width: 40px;
+    height: 40px;
+    border: none;
+    border-radius: 50%;
+    background: rgba(255, 255, 255, 0.15);
+    color: #ffffff;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    cursor: pointer;
+    font-size: 20px;
+    line-height: 1;
+  }
+</style>
+</head>
+
+<body>
+
+<div id="fields"></div>
+
+<div id="fieldSelectionBar">
+  <span id="fieldSelectionCount">0</span>
+  <div class="field-selection-icons">
+    <button id="fieldSelectAllBtn" class="field-selection-btn" type="button" aria-label="Select all" title="Select all">
+      <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+        <rect x="4" y="4" width="16" height="16" rx="3"/>
+        <path d="M8 12l3 3 5-6"/>
+      </svg>
+    </button>
+    <button id="fieldDeselectAllBtn" class="field-selection-btn" type="button" aria-label="Deselect all" title="Deselect all">
+      <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+        <rect x="4" y="4" width="16" height="16" rx="3"/>
+        <path d="M9 9l6 6M15 9l-6 6"/>
+      </svg>
+    </button>
+    <button id="fieldCopySelectedBtn" class="field-selection-btn" type="button" aria-label="Copy selected" title="Copy selected">
+      <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+        <rect x="9" y="9" width="11" height="11" rx="2"/>
+        <path d="M5 15H4a1 1 0 0 1-1-1V4a1 1 0 0 1 1-1h10a1 1 0 0 1 1 1v1"/>
+      </svg>
+    </button>
+    <button id="fieldHideSelectedBtn" class="field-selection-btn" type="button" aria-label="Hide selected" title="Hide selected">
+      <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+        <path d="M2 12s3.5-7 10-7 10 7 10 7-3.5 7-10 7-10-7-10-7z"/>
+        <circle cx="12" cy="12" r="3"/>
+      </svg>
+    </button>
+    <button id="fieldUnhideSelectedBtn" class="field-selection-btn" type="button" aria-label="Unhide selected" title="Unhide selected">
+      <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+        <path d="M3 3l18 18"/>
+        <path d="M10.6 10.6a2 2 0 0 0 2.8 2.8"/>
+        <path d="M9.9 5.1A9.4 9.4 0 0 1 12 5c5 0 9 4 10 7-.4 1.2-1.2 2.5-2.3 3.6M6.6 6.6C4.4 8 3 10 2 12c1 3 5 7 10 7 1.3 0 2.5-.2 3.6-.6"/>
+      </svg>
+    </button>
+    <button id="fieldDeleteSelectedBtn" class="field-selection-btn" type="button" aria-label="Delete selected" title="Delete selected">
+      <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+        <path d="M4 7h16"/>
+        <path d="M9 7V4a1 1 0 0 1 1-1h4a1 1 0 0 1 1 1v3"/>
+        <path d="M6 7l1 13a2 2 0 0 0 2 2h6a2 2 0 0 0 2-2l1-13"/>
+        <path d="M10 11v6"/>
+        <path d="M14 11v6"/>
+      </svg>
+    </button>
+  </div>
+</div>
+
+<div id="lock">
+  <textarea id="pinInput" autocomplete="off" spellcheck="false"></textarea>
+</div>
+
+<button id="saveBtn" type="button" aria-label="Save">
+  <svg
+    viewBox="0 0 24 24"
+    width="22"
+    height="22"
+    fill="none"
+    stroke="currentColor"
+    stroke-width="2.2"
+    stroke-linecap="round"
+    stroke-linejoin="round"
+  >
+    <path d="M5 12l4 4L19 6"/>
+  </svg>
+</button>
+
+<button id="goToFieldBtn" type="button" aria-label="Go to CB number">
+  <svg
+    viewBox="0 0 24 24"
+    width="20"
+    height="20"
+    fill="none"
+    stroke="currentColor"
+    stroke-width="2.2"
+    stroke-linecap="round"
+    stroke-linejoin="round"
+  >
+    <circle cx="12" cy="12" r="9"/>
+    <circle cx="12" cy="12" r="3"/>
+    <path d="M12 3v3M12 18v3M21 12h-3M6 12H3"/>
+  </svg>
+</button>
+
+<button id="galleryBtn" type="button" aria-label="Files">
+  <svg
+    viewBox="0 0 24 24"
+    width="22"
+    height="22"
+    fill="none"
+    stroke="currentColor"
+    stroke-width="2.2"
+    stroke-linecap="round"
+    stroke-linejoin="round"
+  >
+    <path d="M14 3H7a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2V9z"/>
+    <path d="M14 3v6h6"/>
+  </svg>
+</button>
+
+<button id="scrollFieldTopBtn" type="button" aria-label="Scroll to top of this field" title="Top of this field">
+  <svg
+    viewBox="0 0 24 24"
+    width="18"
+    height="18"
+    fill="none"
+    stroke="currentColor"
+    stroke-width="2.2"
+    stroke-linecap="round"
+    stroke-linejoin="round"
+  >
+    <path d="M12 19V6"/>
+    <path d="M6 11l6-6 6 6"/>
+  </svg>
+</button>
+
+<button id="scrollFirstFieldTopBtn" type="button" aria-label="Scroll to top of cb 1" title="Top of cb 1">
+  <svg
+    viewBox="0 0 24 24"
+    width="18"
+    height="18"
+    fill="none"
+    stroke="currentColor"
+    stroke-width="2.2"
+    stroke-linecap="round"
+    stroke-linejoin="round"
+  >
+    <path d="M5 5h14"/>
+    <path d="M12 19v-9"/>
+    <path d="M7 13l5-5 5 5"/>
+  </svg>
+</button>
+
+<button id="hideCurrentFieldBtn" type="button" aria-label="Hide this field" title="Hide this field">
+  <svg
+    viewBox="0 0 24 24"
+    width="18"
+    height="18"
+    fill="none"
+    stroke="currentColor"
+    stroke-width="2.2"
+    stroke-linecap="round"
+    stroke-linejoin="round"
+  >
+    <path d="M3 3l18 18"/>
+    <path d="M10.6 10.6a2 2 0 0 0 2.8 2.8"/>
+    <path d="M9.9 5.1A9.4 9.4 0 0 1 12 5c5 0 9 4 10 7-.4 1.2-1.2 2.5-2.3 3.6M6.6 6.6C4.4 8 3 10 2 12c1 3 5 7 10 7 1.3 0 2.5-.2 3.6-.6"/>
+  </svg>
+</button>
+
+<button id="bookmarkViewBtn" type="button" aria-label="Bookmark this view" title="Bookmark this view">
+  <svg
+    viewBox="0 0 24 24"
+    width="18"
+    height="18"
+    fill="none"
+    stroke="currentColor"
+    stroke-width="2.2"
+    stroke-linecap="round"
+    stroke-linejoin="round"
+  >
+    <path d="M6 3h12a1 1 0 0 1 1 1v17l-7-4-7 4V4a1 1 0 0 1 1-1z"/>
+  </svg>
+</button>
+
+<button id="scrollFieldBottomBtn" type="button" aria-label="Scroll to bottom of this field" title="Bottom of this field">
+  <svg
+    viewBox="0 0 24 24"
+    width="18"
+    height="18"
+    fill="none"
+    stroke="currentColor"
+    stroke-width="2.2"
+    stroke-linecap="round"
+    stroke-linejoin="round"
+  >
+    <path d="M12 5v13"/>
+    <path d="M18 13l-6 6-6-6"/>
+  </svg>
+</button>
+
+<button id="scrollLastFieldBottomBtn" type="button" aria-label="Scroll to bottom of last field" title="Bottom of last field">
+  <svg
+    viewBox="0 0 24 24"
+    width="18"
+    height="18"
+    fill="none"
+    stroke="currentColor"
+    stroke-width="2.2"
+    stroke-linecap="round"
+    stroke-linejoin="round"
+  >
+    <path d="M5 19h14"/>
+    <path d="M12 5v9"/>
+    <path d="M7 11l5 5 5-5"/>
+  </svg>
+</button>
+
+<div id="galleryOverlay">
+  <div id="galleryHeader">
+    <button id="galleryCloseBtn" class="gallery-header-btn" type="button" aria-label="Close files">&times;</button>
+    <button id="galleryAddBtn" class="gallery-header-btn" type="button" aria-label="Add file">+</button>
+  </div>
+  <input id="galleryAddInput" type="file" multiple style="display:none">
+  <div id="galleryBulkActions">
+    <button id="gallerySelectAllBtn" type="button">Select all</button>
+    <button id="galleryDeselectAllBtn" type="button">Deselect all</button>
+  </div>
+  <div id="gallerySelectionBar">
+    <span id="gallerySelectionCount">0 selected</span>
+    <button id="galleryDeleteSelectedBtn" type="button">Delete selected</button>
+  </div>
+  <div id="galleryEmpty">No files yet</div>
+  <div id="galleryGrid"></div>
+</div>
+
+<div id="lightbox">
+  <button id="lightboxCloseBtn" type="button" aria-label="Close">&times;</button>
+  <img id="lightboxImg" alt="">
+</div>
+
+<script type="module">
+import {
+  initializeApp
+} from 'https://www.gstatic.com/firebasejs/12.17.1/firebase-app.js';
+
+import {
+  getDatabase,
+  ref as dbRef,
+  set,
+  onValue
+} from 'https://www.gstatic.com/firebasejs/12.17.1/firebase-database.js';
+
+import {
+  getStorage,
+  ref as storageRef,
+  uploadBytes,
+  getDownloadURL,
+  deleteObject
+} from 'https://www.gstatic.com/firebasejs/12.17.1/firebase-storage.js';
+
+const firebaseApp = initializeApp({
+  databaseURL: 'https://rtcb-81402-default-rtdb.firebaseio.com',
+  storageBucket: 'rtcb-81402.firebasestorage.app'
+});
+
+const db = getDatabase(firebaseApp);
+const storage = getStorage(firebaseApp);
+const clipRef = dbRef(db, 'cb');
+const galleryDbRef = dbRef(db, 'gallery');
+
+const container = document.getElementById('fields');
+const saveBtn = document.getElementById('saveBtn');
+const fieldSelectionBar = document.getElementById('fieldSelectionBar');
+const fieldSelectionCount = document.getElementById('fieldSelectionCount');
+const fieldSelectAllBtn = document.getElementById('fieldSelectAllBtn');
+const fieldDeselectAllBtn = document.getElementById('fieldDeselectAllBtn');
+const fieldHideSelectedBtn = document.getElementById('fieldHideSelectedBtn');
+const fieldUnhideSelectedBtn = document.getElementById('fieldUnhideSelectedBtn');
+const fieldCopySelectedBtn = document.getElementById('fieldCopySelectedBtn');
+const fieldDeleteSelectedBtn = document.getElementById('fieldDeleteSelectedBtn');
+const scrollFieldTopBtn = document.getElementById('scrollFieldTopBtn');
+const scrollFirstFieldTopBtn = document.getElementById('scrollFirstFieldTopBtn');
+const hideCurrentFieldBtn = document.getElementById('hideCurrentFieldBtn');
+const bookmarkViewBtn = document.getElementById('bookmarkViewBtn');
+const scrollFieldBottomBtn = document.getElementById('scrollFieldBottomBtn');
+const scrollLastFieldBottomBtn = document.getElementById('scrollLastFieldBottomBtn');
+
+let activeField = null;
+
+/*
+  Remembers the field and scroll position a hide just acted on, so a
+  same-button second tap can undo an accidental hide and land back
+  exactly where you were -- not just re-expand the field, but restore
+  the read position inside it too. Cleared once you focus a different
+  field, since that signals the hide was intentional after all.
+*/
+let hiddenFieldMemory = null;
+
+/*
+  Remembers a bookmarked view -- the outer list's scroll position,
+  and if a field happened to be focused when it was set, that field
+  plus its own internal scroll -- so the bookmark button can jump
+  back to exactly that spot later, no matter how far the user has
+  since scrolled or which field (if any) they're in now. Unlike
+  hiddenFieldMemory this is never cleared by focus changes: a
+  bookmark is a place you want to return to repeatedly, not an
+  action to undo once.
+*/
+let bookmarkedView = null;
+
+/*
+  Tapping these buttons must not steal focus from the field being
+  edited -- otherwise the field blurs first, activeField clears, and
+  the click handler has nothing left to act on. preventDefault on
+  mousedown keeps focus exactly where it was going into the click.
+*/
+scrollFieldTopBtn.addEventListener('mousedown', (event) => event.preventDefault());
+scrollFirstFieldTopBtn.addEventListener('mousedown', (event) => event.preventDefault());
+hideCurrentFieldBtn.addEventListener('mousedown', (event) => event.preventDefault());
+bookmarkViewBtn.addEventListener('mousedown', (event) => event.preventDefault());
+scrollFieldBottomBtn.addEventListener('mousedown', (event) => event.preventDefault());
+scrollLastFieldBottomBtn.addEventListener('mousedown', (event) => event.preventDefault());
+
+/*
+  Every one of these buttons exists so you can see the top or bottom
+  of something -- and the on-screen keyboard is exactly what's in the
+  way of that on a phone. So each one blurs the field afterward on
+  purpose: the point of pressing it is to look, not to keep typing.
+*/
+scrollFieldTopBtn.addEventListener('click', () => {
+  if (!activeField) return;
+  const field = activeField;
+  const idx = elements.indexOf(field);
+  const wrap = wraps[idx];
+  if (wrap) wrap.scrollIntoView({ behavior: 'smooth', block: 'start' });
+  field.scrollTo({ top: 0, behavior: 'smooth' });
+  field.blur();
+});
+
+scrollFirstFieldTopBtn.addEventListener('click', () => {
+  const field = activeField;
+  container.scrollTo({ top: 0, behavior: 'smooth' });
+  if (field) field.blur();
+});
+
+hideCurrentFieldBtn.addEventListener('click', () => {
+  /*
+    Second tap in the same spot: undo. This runs whether or not
+    anything is currently focused, since the whole point is that the
+    field was just blurred by the hide itself.
+  */
+  if (hiddenFieldMemory) {
+    const memory = hiddenFieldMemory;
+    hiddenFieldMemory = null;
+    const idx = elements.indexOf(memory.el);
+    if (idx !== -1) {
+      const wrap = wraps[idx];
+      if (wrap && wrap.classList.contains('collapsed')) {
+        const toggleBtn = wrap.querySelector('.field-collapse-toggle-btn');
+        if (toggleBtn) toggleBtn.click();
+      }
+
+      /*
+        focus() on a contenteditable div makes the browser drop the
+        caret somewhere (often the start) and then auto-scroll every
+        scrollable ancestor into view to follow it -- not just the
+        field's own content, but the outer list too. That native
+        scroll can land *after* our own restore below, silently
+        overriding it. The result looks like unhide is snapping back
+        to wherever the cursor or last touch happened to be, instead
+        of exactly the view -- both the field's internal scroll and
+        the list's scroll position -- from the moment Hide was
+        pressed. preventScroll stops the browser's own scroll-into-
+        view tied to the focus itself, and re-asserting our saved
+        positions a couple of frames later beats any native
+        caret-follow scroll that still sneaks in.
+      */
+      memory.el.focus({ preventScroll: true });
+      const restoreScroll = () => {
+        container.scrollTo({ top: memory.containerScrollTop, behavior: 'smooth' });
+        memory.el.scrollTo({ top: memory.scrollTop, behavior: 'smooth' });
+      };
+      restoreScroll();
+      requestAnimationFrame(() => requestAnimationFrame(restoreScroll));
+    }
+    updateScrollHelperButtons();
+    return;
+  }
+
+  if (!activeField) return;
+  const field = activeField;
+  const idx = elements.indexOf(field);
+  if (idx === -1 || idx === elements.length - 1) return;
+  const wrap = wraps[idx];
+  if (!wrap || wrap.classList.contains('collapsed')) return;
+
+  hiddenFieldMemory = { el: field, scrollTop: field.scrollTop, containerScrollTop: container.scrollTop };
+  const toggleBtn = wrap.querySelector('.field-collapse-toggle-btn');
+  if (toggleBtn) toggleBtn.click();
+  field.blur();
+  updateScrollHelperButtons();
+});
+
+/*
+  True while the bookmarked field exists but is currently collapsed.
+  You can't usefully "go to" a spot inside a field that's hidden, so
+  the bookmark button goes into a disabled state until that field is
+  unhidden again -- rather than jumping to a collapsed field's header
+  or silently doing nothing with no explanation.
+*/
+function isBookmarkFieldHidden() {
+  if (!bookmarkedView || !bookmarkedView.el) return false;
+  const idx = elements.indexOf(bookmarkedView.el);
+  if (idx === -1) return false;
+  const wrap = wraps[idx];
+  return !!(wrap && wrap.classList.contains('collapsed'));
+}
+
+/*
+  Clears a bookmark the moment the field it points to is actually
+  deleted (not just hidden) -- an armed bookmark button pointing at a
+  field that no longer exists has nothing left to disable, jump to,
+  or double-tap to reset, so this resets it outright rather than
+  leaving a stale reference for the click handler to work around.
+*/
+function clearBookmarkIfField(el) {
+  if (bookmarkedView && bookmarkedView.el === el) {
+    bookmarkedView = null;
+    updateScrollHelperButtons();
+  }
+}
+
+bookmarkViewBtn.addEventListener('click', () => {
+  /*
+    Disabled while the bookmarked field is hidden: a single tap does
+    nothing here (see the dblclick handler below for the override).
+  */
+  if (isBookmarkFieldHidden()) return;
+
+  /*
+    Second tap: jump back to the bookmarked view and clear the
+    bookmark -- same "tap again" concept as Hide's undo, just applied
+    to marking a spot instead of reversing an action. One press
+    remembers where you are; the next press takes you back there.
+  */
+  if (bookmarkedView) {
+    const memory = bookmarkedView;
+    bookmarkedView = null;
+
+    const idx = memory.el ? elements.indexOf(memory.el) : -1;
+    const wrap = idx !== -1 ? wraps[idx] : null;
+    const fieldIsFocusable = wrap && !wrap.classList.contains('collapsed');
+
+    if (fieldIsFocusable) {
+      /*
+        Jump to the field itself rather than to the container's old
+        absolute scrollTop -- fields above it may since have been
+        added, deleted, hidden, or unhidden, all of which shift where
+        this field actually sits, and a stale absolute scroll number
+        would land on whatever now happens to occupy that pixel
+        offset instead of on this field. scrollIntoView follows the
+        field wherever it currently is; the field's own internal
+        scrollTop is unaffected by any of that and still restores
+        exactly.
+
+        Same reasoning as the hide undo above applies to focus():
+        it drags every scrollable ancestor along with the caret,
+        which can override our restore if it lands afterward.
+        preventScroll plus a couple of re-asserted frames keeps the
+        bookmarked view exact.
+      */
+      wrap.scrollIntoView({ behavior: 'smooth', block: 'start' });
+      memory.el.focus({ preventScroll: true });
+      const restoreScroll = () => {
+        wrap.scrollIntoView({ behavior: 'smooth', block: 'start' });
+        memory.el.scrollTo({ top: memory.scrollTop, behavior: 'smooth' });
+      };
+      restoreScroll();
+      requestAnimationFrame(() => requestAnimationFrame(restoreScroll));
+    } else {
+      /*
+        No field was recorded for this bookmark (nothing was focused
+        when it was set) -- there's no field to anchor to, so this is
+        the one case an absolute list scroll position is all we have.
+      */
+      if (activeField) activeField.blur();
+      container.scrollTo({ top: memory.containerScrollTop, behavior: 'smooth' });
+    }
+
+    updateScrollHelperButtons();
+    return;
+  }
+
+  /*
+    First tap: remember exactly where the user is right now -- the
+    list's scroll position, and if a field happens to be focused,
+    that field plus its own internal scroll -- so the next tap can
+    bring them straight back, no matter how far they scroll away or
+    what they focus in the meantime.
+  */
+  bookmarkedView = {
+    el: activeField,
+    scrollTop: activeField ? activeField.scrollTop : 0,
+    containerScrollTop: container.scrollTop
+  };
+  updateScrollHelperButtons();
+});
+
+bookmarkViewBtn.addEventListener('dblclick', () => {
+  /*
+    Only special-cased while disabled: double-tapping a bookmark
+    button that's free to jump normally would be surprising, since
+    the second of the two clicks would already have triggered the
+    jump above. While disabled (the bookmarked field is hidden), a
+    single tap intentionally does nothing, so a double-tap is the
+    deliberate "never mind that one, bookmark here instead" gesture:
+    it drops the old bookmark and saves a fresh one at the current
+    view, exactly like a first tap would if nothing were bookmarked.
+  */
+  if (!isBookmarkFieldHidden()) return;
+
+  bookmarkedView = {
+    el: activeField,
+    scrollTop: activeField ? activeField.scrollTop : 0,
+    containerScrollTop: container.scrollTop
+  };
+  updateScrollHelperButtons();
+});
+
+scrollFieldBottomBtn.addEventListener('click', () => {
+  if (!activeField) return;
+  const field = activeField;
+  const idx = elements.indexOf(field);
+  const wrap = wraps[idx];
+  if (wrap) wrap.scrollIntoView({ behavior: 'smooth', block: 'end' });
+  field.scrollTo({ top: field.scrollHeight, behavior: 'smooth' });
+  field.blur();
+});
+
+scrollLastFieldBottomBtn.addEventListener('click', () => {
+  const field = activeField;
+  container.scrollTo({ top: container.scrollHeight, behavior: 'smooth' });
+  if (field) field.blur();
+});
+
+/*
+  The per-field top/bottom buttons only matter when this field itself
+  is long, so those stay tied to whichever field currently has focus.
+  The list-level top/bottom buttons are a different question: even a
+  page full of short fields can be too long to scroll through
+  quickly, and wanting to jump to the very top or bottom of the whole
+  list has nothing to do with whether a field happens to be focused
+  right now. Requiring a focused field first was forcing a pointless
+  tap into a field just to reach these, so they react only to whether
+  the list overflows the screen. Hide is available for any focused
+  field except the empty placeholder at the end, which has nothing to
+  collapse -- and stays visible after a hide, un-tied from focus, for
+  as long as there's an undo pending. Bookmark follows the same
+  focus-independent reasoning as the top/bottom buttons -- marking or
+  returning to a spot in the view has nothing to do with whether a
+  field is currently focused -- and stays visible whenever there's a
+  bookmark waiting to be returned to, even if the list happens to be
+  short at that moment.
+*/
+function updateScrollHelperButtons() {
+  const anyFocused = !!activeField;
+  const idx = anyFocused ? elements.indexOf(activeField) : -1;
+  const isLastField = anyFocused && idx === elements.length - 1;
+  const fieldLong = anyFocused && activeField.scrollHeight > window.innerHeight * 0.9;
+  const listLong = container.scrollHeight > container.clientHeight * 1.1;
+  scrollFieldTopBtn.classList.toggle('visible', fieldLong);
+  scrollFieldBottomBtn.classList.toggle('visible', fieldLong);
+  hideCurrentFieldBtn.classList.toggle('visible', (anyFocused && !isLastField) || !!hiddenFieldMemory);
+  hideCurrentFieldBtn.classList.toggle('armed', !!hiddenFieldMemory);
+  bookmarkViewBtn.classList.toggle('visible', listLong || !!bookmarkedView);
+  bookmarkViewBtn.classList.toggle('armed', !!bookmarkedView);
+  bookmarkViewBtn.classList.toggle('disabled', isBookmarkFieldHidden());
+  scrollFirstFieldTopBtn.classList.toggle('visible', listLong);
+  scrollLastFieldBottomBtn.classList.toggle('visible', listLong);
+}
+
+window.addEventListener('resize', updateScrollHelperButtons);
+
+/*
+  listLong depends on container.scrollHeight, which changes any time
+  fields are added, removed, collapsed/expanded, or grow from pasted
+  images loading in -- far more places than are practical to thread
+  an explicit updateScrollHelperButtons() call through by hand. A
+  ResizeObserver on the container catches all of those automatically,
+  including the very first layout pass, so the very-top/very-bottom
+  buttons are correct on load without needing a field to be focused
+  first.
+*/
+if (window.ResizeObserver) {
+  const containerResizeObserver = new ResizeObserver(() => updateScrollHelperButtons());
+  containerResizeObserver.observe(container);
+}
+
+
+function setFieldCollapsedByIndex(idx, collapsed) {
+  const wrap = wraps[idx];
+  if (!wrap) return;
+
+  wrap.classList.toggle('collapsed', collapsed);
+
+  const btn = wrap.querySelector('.field-collapse-toggle-btn');
+  if (btn) {
+    btn.classList.toggle('active', collapsed);
+    btn.innerHTML = collapsed
+      ? '<svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">' +
+        '<path d="M6 9l6 6 6-6"/>' +
+        '</svg>'
+      : '<svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">' +
+        '<path d="M18 15l-6-6-6 6"/>' +
+        '</svg>';
+  }
+
+  if (state[idx]) {
+    state[idx].c = collapsed;
+  }
+}
+
+fieldSelectAllBtn.addEventListener('click', () => {
+  elements.forEach((el, idx) => {
+    if (idx === elements.length - 1) return;
+    selectedFields.add(el);
+    if (checkboxes[idx]) checkboxes[idx].checked = true;
+    if (state[idx]) state[idx].s = true;
+  });
+  updateFieldSelectionBar();
+  save();
+});
+
+fieldDeselectAllBtn.addEventListener('click', () => {
+  selectedFields.forEach(el => {
+    const idx = elements.indexOf(el);
+    if (idx !== -1 && checkboxes[idx]) checkboxes[idx].checked = false;
+    if (idx !== -1 && state[idx]) state[idx].s = false;
+  });
+  selectedFields.clear();
+  updateFieldSelectionBar();
+  save();
+});
+
+fieldCopySelectedBtn.addEventListener('click', () => {
+  copySelectedFields(fieldCopySelectedBtn);
+});
+
+fieldHideSelectedBtn.addEventListener('click', () => {
+  if (selectedFields.size === 0) return;
+
+  const previousScrollTop = container.scrollTop;
+
+  selectedFields.forEach(el => {
+    const idx = elements.indexOf(el);
+    if (idx !== -1) setFieldCollapsedByIndex(idx, true);
+    if (idx !== -1 && checkboxes[idx]) checkboxes[idx].checked = false;
+    if (idx !== -1 && state[idx]) state[idx].s = false;
+  });
+
+  selectedFields.clear();
+  updateFieldSelectionBar();
+  save();
+
+  /*
+    Collapsing several fields at once can shrink the list by a lot,
+    which otherwise yanks whatever was on screen up to fill the gap.
+    An accidental tap on Hide Selected shouldn't relocate the view at
+    all -- restoring the exact scrollTop right after layout settles
+    means the fields the user was actually looking at stay exactly
+    where they were, same as if nothing had happened.
+  */
+  requestAnimationFrame(() => {
+    container.scrollTop = previousScrollTop;
+  });
+});
+
+fieldUnhideSelectedBtn.addEventListener('click', () => {
+  if (selectedFields.size === 0) return;
+
+  const previousScrollTop = container.scrollTop;
+
+  selectedFields.forEach(el => {
+    const idx = elements.indexOf(el);
+    if (idx !== -1) setFieldCollapsedByIndex(idx, false);
+    if (idx !== -1 && checkboxes[idx]) checkboxes[idx].checked = false;
+    if (idx !== -1 && state[idx]) state[idx].s = false;
+  });
+
+  selectedFields.clear();
+  updateFieldSelectionBar();
+  save();
+
+  /*
+    Same concept as Hide Selected above, mirrored for expanding:
+    re-expanding several fields at once can push everything below
+    them far down the list, which otherwise carries the view along
+    with it. Restoring the pre-click scrollTop keeps an accidental
+    tap on Unhide Selected from relocating the view at all.
+  */
+  requestAnimationFrame(() => {
+    container.scrollTop = previousScrollTop;
+  });
+});
+
+fieldDeleteSelectedBtn.addEventListener('click', () => {
+  const count = selectedFields.size;
+  if (count === 0) return;
+
+  const confirmed = window.confirm(
+    'Delete ' + count + (count === 1 ? ' selected field' : ' selected fields') + '? This cannot be undone.'
+  );
+  if (!confirmed) return;
+
+  const toDelete = Array.from(selectedFields);
+  selectedFields.clear();
+
+  toDelete.forEach(el => removeField(el));
+  ensureTrailingEmptyField();
+
+  updateLabels();
+  updateFieldSelectionBar();
+  updateSaveIndicator();
+  save();
+});
+
+let state = [{ h: '', c: false, s: false }];
+let elements = [];
+let wraps = [];
+let checkboxes = [];
+let selectedFields = new Set();
+
+let pendingRemote = null;
+
+let lastSavedSnapshot = JSON.stringify([{ h: '', c: false, s: false }]);
+
+function createField(value, collapsedInitial, selectedInitial) {
+  const wrap = document.createElement('div');
+  wrap.className = 'field-wrap';
+
+  const label = document.createElement('div');
+  label.className = 'field-label';
+
+  const left = document.createElement('div');
+  left.className = 'field-label-left';
+
+  const labelText = document.createElement('span');
+  labelText.className = 'field-label-text';
+  left.appendChild(labelText);
+
+  const actions = document.createElement('div');
+  actions.className = 'field-label-actions';
+
+  const copyBtn = document.createElement('button');
+  copyBtn.type = 'button';
+  copyBtn.className = 'field-action-btn field-copy-btn';
+  copyBtn.setAttribute('aria-label', 'Copy all text');
+  copyBtn.innerHTML =
+    '<svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">' +
+    '<rect x="9" y="9" width="11" height="11" rx="2"/>' +
+    '<path d="M5 15H4a1 1 0 0 1-1-1V4a1 1 0 0 1 1-1h10a1 1 0 0 1 1 1v1"/>' +
+    '</svg>';
+
+  const pasteBtn = document.createElement('button');
+  pasteBtn.type = 'button';
+  pasteBtn.className = 'field-action-btn field-paste-btn';
+  pasteBtn.setAttribute('aria-label', 'Paste text');
+  pasteBtn.innerHTML =
+    '<svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">' +
+    '<rect x="6" y="6" width="12" height="16" rx="2"/>' +
+    '<path d="M9 4h6a1 1 0 0 1 1 1v2H8V5a1 1 0 0 1 1-1z"/>' +
+    '</svg>';
+
+  const deleteBtn = document.createElement('button');
+  deleteBtn.type = 'button';
+  deleteBtn.className = 'field-action-btn field-delete-btn';
+  deleteBtn.setAttribute('aria-label', 'Delete this field');
+  deleteBtn.innerHTML =
+    '<svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">' +
+    '<path d="M4 7h16"/>' +
+    '<path d="M9 7V4a1 1 0 0 1 1-1h4a1 1 0 0 1 1 1v3"/>' +
+    '<path d="M6 7l1 13a2 2 0 0 0 2 2h6a2 2 0 0 0 2-2l1-13"/>' +
+    '<path d="M10 11v6"/>' +
+    '<path d="M14 11v6"/>' +
+    '</svg>';
+
+  const collapseToggleBtn = document.createElement('button');
+  collapseToggleBtn.type = 'button';
+  collapseToggleBtn.className = 'field-action-btn field-collapse-toggle-btn';
+  collapseToggleBtn.setAttribute('aria-label', 'Collapse or expand this field');
+  collapseToggleBtn.innerHTML =
+    '<svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">' +
+    '<path d="M18 15l-6-6-6 6"/>' +
+    '</svg>';
+
+  actions.appendChild(copyBtn);
+  actions.appendChild(pasteBtn);
+  actions.appendChild(deleteBtn);
+  actions.appendChild(collapseToggleBtn);
+  left.appendChild(actions);
+  label.appendChild(left);
+
+  const selectCheckbox = document.createElement('input');
+  selectCheckbox.type = 'checkbox';
+  selectCheckbox.className = 'field-select-checkbox';
+  selectCheckbox.setAttribute('aria-label', 'Select this field');
+  label.appendChild(selectCheckbox);
+
+  wrap.appendChild(label);
+
+  const el = document.createElement('div');
+  el.className = 'field-input';
+  el.contentEditable = 'true';
+  el.innerHTML = value;
+  el.setAttribute('autocorrect', 'off');
+  el.setAttribute('autocapitalize', 'off');
+  el.setAttribute('spellcheck', 'false');
+
+  function setCollapsed(collapsed) {
+    wrap.classList.toggle('collapsed', collapsed);
+    collapseToggleBtn.classList.toggle('active', collapsed);
+    collapseToggleBtn.innerHTML = collapsed
+      ? '<svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">' +
+        '<path d="M6 9l6 6 6-6"/>' +
+        '</svg>'
+      : '<svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">' +
+        '<path d="M18 15l-6-6-6 6"/>' +
+        '</svg>';
+  }
+
+  el.addEventListener('input', (event) => {
+    handleInput(el, event);
+    if (activeField === el) updateScrollHelperButtons();
+  });
+  el.addEventListener('focus', () => {
+    activeField = el;
+    if (hiddenFieldMemory && hiddenFieldMemory.el !== el) {
+      hiddenFieldMemory = null;
+    }
+    updateScrollHelperButtons();
+  });
+  el.addEventListener('blur', () => {
+    maybeApplyPendingRemote();
+    save();
+    if (activeField === el) {
+      activeField = null;
+      updateScrollHelperButtons();
+    }
+  });
+  el.addEventListener('paste', (event) => handleFieldPaste(event, el));
+
+  if (collapsedInitial) {
+    setCollapsed(true);
+  }
+
+  if (selectedInitial) {
+    selectCheckbox.checked = true;
+    selectedFields.add(el);
+  }
+
+  copyBtn.addEventListener('click', () => copyFieldText(el, copyBtn));
+  pasteBtn.addEventListener('click', () => pasteIntoField(el));
+  deleteBtn.addEventListener('click', () => deleteField(el));
+  collapseToggleBtn.addEventListener('click', () => {
+    const newCollapsed = !wrap.classList.contains('collapsed');
+    setCollapsed(newCollapsed);
+    const idx = elements.indexOf(el);
+    if (idx !== -1 && state[idx]) {
+      state[idx].c = newCollapsed;
+    }
+    updateFieldSelectionBar();
+    save();
+  });
+
+  selectCheckbox.addEventListener('change', () => {
+    const idx = elements.indexOf(el);
+    if (selectCheckbox.checked) {
+      selectedFields.add(el);
+      if (idx !== -1 && state[idx]) state[idx].s = true;
+    } else {
+      selectedFields.delete(el);
+      if (idx !== -1 && state[idx]) state[idx].s = false;
+    }
+    updateFieldSelectionBar();
+    save();
+  });
+
+  wrap.appendChild(el);
+
+  return { wrap, el, checkbox: selectCheckbox };
+}
+
+function updateLabels() {
+  wraps.forEach((wrap, i) => {
+    wrap.querySelector('.field-label-text').textContent = 'cb ' + (i + 1);
+    wrap.classList.toggle('is-last-field', i === wraps.length - 1);
+  });
+}
+
+function isFieldEmpty(el) {
+  if (el.querySelector('.inline-image-wrap')) return false;
+  return el.textContent.trim() === '';
+}
+
+function isHtmlEmpty(html) {
+  if (!html) return true;
+  const div = document.createElement('div');
+  div.innerHTML = html;
+  return isFieldEmpty(div);
+}
+
+function placeCaretAtEnd(el) {
+  el.focus();
+  const range = document.createRange();
+  range.selectNodeContents(el);
+  range.collapse(false);
+  const sel = window.getSelection();
+  sel.removeAllRanges();
+  sel.addRange(range);
+}
+
+function escapeHtml(str) {
+  const div = document.createElement('div');
+  div.textContent = str;
+  return div.innerHTML;
+}
+
+function insertHtmlAtCursor(el, html) {
+  el.focus();
+  const sel = window.getSelection();
+  let range;
+  if (sel && sel.rangeCount > 0 && el.contains(sel.anchorNode)) {
+    range = sel.getRangeAt(0);
+  } else {
+    range = document.createRange();
+    range.selectNodeContents(el);
+    range.collapse(false);
+  }
+  range.deleteContents();
+  const fragment = range.createContextualFragment(html);
+  const lastNode = fragment.lastChild;
+  range.insertNode(fragment);
+  if (lastNode) {
+    range.setStartAfter(lastNode);
+    range.collapse(true);
+    sel.removeAllRanges();
+    sel.addRange(range);
+  }
+}
+
+function insertTextAtCursor(el, text) {
+  insertHtmlAtCursor(el, escapeHtml(text).replace(/\n/g, '<br>'));
+}
+
+function updateFieldSelectionBar() {
+  selectedFields.forEach(el => {
+    if (!elements.includes(el)) selectedFields.delete(el);
+  });
+
+  const count = selectedFields.size;
+  const showBar = count > 0;
+
+  let anyVisible = false;
+  let anyHidden = false;
+
+  selectedFields.forEach(el => {
+    const idx = elements.indexOf(el);
+    const wrap = wraps[idx];
+    if (wrap && wrap.classList.contains('collapsed')) {
+      anyHidden = true;
+    } else {
+      anyVisible = true;
+    }
+  });
+
+  fieldSelectionBar.classList.toggle('visible', showBar);
+  fieldSelectionCount.textContent = count;
+  fieldSelectionCount.setAttribute('aria-label', count + (count === 1 ? ' field selected' : ' fields selected'));
+  fieldSelectionCount.title = fieldSelectionCount.getAttribute('aria-label');
+  fieldHideSelectedBtn.classList.toggle('disabled', !anyVisible);
+  fieldUnhideSelectedBtn.classList.toggle('disabled', !anyHidden);
+  fieldCopySelectedBtn.classList.toggle('disabled', count === 0);
+  fieldCopySelectedBtn.classList.toggle('has-hidden', anyHidden);
+  fieldCopySelectedBtn.title = anyHidden ? 'Copy selected (includes hidden text)' : 'Copy selected';
+  fieldDeleteSelectedBtn.classList.toggle('disabled', count === 0);
+  container.classList.toggle('with-selection-bar', showBar);
+}
+
+function removeField(el) {
+  const idx = elements.indexOf(el);
+  if (idx === -1) return;
+
+  selectedFields.delete(el);
+
+  if (elements.length === 1) {
+    el.innerHTML = '';
+    state[idx] = { h: '', c: false, s: false };
+    if (checkboxes[idx]) checkboxes[idx].checked = false;
+    return;
+  }
+
+  elements.splice(idx, 1);
+  state.splice(idx, 1);
+  checkboxes.splice(idx, 1);
+  const wrap = wraps.splice(idx, 1)[0];
+  wrap.remove();
+  clearBookmarkIfField(el);
+}
+
+function ensureTrailingEmptyField() {
+  if (elements.length === 0 || !isFieldEmpty(elements[elements.length - 1])) {
+    const { wrap, el, checkbox } = createField('', false, false);
+    elements.push(el);
+    state.push({ h: '', c: false, s: false });
+    wraps.push(wrap);
+    checkboxes.push(checkbox);
+    container.appendChild(wrap);
+  }
+}
+
+function deleteField(el) {
+  const idx = elements.indexOf(el);
+  if (idx === -1) return;
+
+  const isLastEmpty = idx === elements.length - 1 && isFieldEmpty(el);
+  if (isLastEmpty) return;
+
+  const confirmed = window.confirm('Delete CB ' + (idx + 1) + '? This cannot be undone.');
+  if (!confirmed) return;
+
+  removeField(el);
+  ensureTrailingEmptyField();
+
+  updateLabels();
+  updateFieldSelectionBar();
+  updateSaveIndicator();
+  save();
+}
+
+function flashCopied(btn) {
+  btn.classList.remove('copied');
+  void btn.offsetWidth;
+  btn.classList.add('copied');
+  clearTimeout(btn._copiedTimer);
+  btn._copiedTimer = setTimeout(() => btn.classList.remove('copied'), 700);
+}
+
+async function copyFieldText(el, btn) {
+  const plain = el.innerText || el.textContent || '';
+  const html = el.innerHTML;
+
+  try {
+    if (window.ClipboardItem) {
+      const item = new ClipboardItem({
+        'text/plain': new Blob([plain], { type: 'text/plain' }),
+        'text/html': new Blob([html], { type: 'text/html' })
+      });
+      await navigator.clipboard.write([item]);
+      flashCopied(btn);
+      return;
+    }
+    await navigator.clipboard.writeText(plain);
+    flashCopied(btn);
+  } catch (err) {
+    try {
+      await navigator.clipboard.writeText(plain);
+      flashCopied(btn);
+    } catch (fallbackErr) {
+      console.error('Copy failed:', fallbackErr);
+    }
+  }
+}
+
+async function copySelectedFields(btn) {
+  if (selectedFields.size === 0) return;
+
+  const orderedEls = elements.filter(el => selectedFields.has(el));
+  const plain = orderedEls
+    .map(el => el.innerText || el.textContent || '')
+    .join('\n\n');
+  const html = orderedEls
+    .map(el => el.innerHTML)
+    .join('<br><br>');
+
+  try {
+    if (window.ClipboardItem) {
+      const item = new ClipboardItem({
+        'text/plain': new Blob([plain], { type: 'text/plain' }),
+        'text/html': new Blob([html], { type: 'text/html' })
+      });
+      await navigator.clipboard.write([item]);
+      flashCopied(btn);
+      return;
+    }
+    await navigator.clipboard.writeText(plain);
+    flashCopied(btn);
+  } catch (err) {
+    try {
+      await navigator.clipboard.writeText(plain);
+      flashCopied(btn);
+    } catch (fallbackErr) {
+      console.error('Copy selected failed:', fallbackErr);
+    }
+  }
+}
+
+async function pasteIntoField(el) {
+  el.focus();
+  try {
+    if (navigator.clipboard.read) {
+      const items = await navigator.clipboard.read();
+
+      for (const item of items) {
+        if (item.types.includes('text/html')) {
+          const blob = await item.getType('text/html');
+          const html = await blob.text();
+          insertHtmlAtCursor(el, html);
+          handleInput(el, { inputType: 'insertFromPaste' });
+          save();
+          return;
+        }
+      }
+
+      for (const item of items) {
+        if (item.types.includes('text/plain')) {
+          const blob = await item.getType('text/plain');
+          const text = await blob.text();
+          if (!text) return;
+          insertTextAtCursor(el, text);
+          handleInput(el, { inputType: 'insertFromPaste' });
+          save();
+          return;
+        }
+      }
+      return;
+    }
+
+    const text = await navigator.clipboard.readText();
+    if (!text) return;
+    insertTextAtCursor(el, text);
+    handleInput(el, { inputType: 'insertFromPaste' });
+    save();
+  } catch (err) {
+    console.error('Paste failed:', err);
+    el.focus();
+  }
+}
+
+function renderAll() {
+  container.innerHTML = '';
+  elements = [];
+  wraps = [];
+  checkboxes = [];
+  selectedFields.clear();
+
+  state.forEach(entry => {
+    const h = entry && typeof entry === 'object' ? (entry.h || '') : (entry || '');
+    const c = entry && typeof entry === 'object' ? !!entry.c : false;
+    const s = entry && typeof entry === 'object' ? !!entry.s : false;
+    const { wrap, el, checkbox } = createField(h, c, s);
+    elements.push(el);
+    wraps.push(wrap);
+    checkboxes.push(checkbox);
+    container.appendChild(wrap);
+  });
+
+  updateLabels();
+  updateFieldSelectionBar();
+}
+
+function handleInput(el, event) {
+  const idx = elements.indexOf(el);
+
+  if (idx === -1) return;
+
+  const html = el.innerHTML;
+  state[idx].h = html;
+  const empty = isFieldEmpty(el);
+
+  if (empty && idx !== elements.length - 1) {
+    const removedEl = elements.splice(idx, 1)[0];
+    state.splice(idx, 1);
+    checkboxes.splice(idx, 1);
+    const wrap = wraps.splice(idx, 1)[0];
+    wrap.remove();
+    selectedFields.delete(removedEl);
+    clearBookmarkIfField(removedEl);
+    updateLabels();
+    updateFieldSelectionBar();
+
+    if (elements[idx]) {
+      elements[idx].focus();
+    } else if (elements.length > 0) {
+      elements[elements.length - 1].focus();
+    }
+
+  } else if (!empty && idx === elements.length - 1) {
+    const { wrap, el: newEl, checkbox: newCheckbox } = createField('', false, false);
+    elements.push(newEl);
+    state.push({ h: '', c: false, s: false });
+    wraps.push(wrap);
+    checkboxes.push(newCheckbox);
+    container.appendChild(wrap);
+    updateLabels();
+    updateFieldSelectionBar();
+  }
+
+  updateSaveIndicator();
+
+  if (
+    event &&
+    (event.inputType === 'insertLineBreak' ||
+      event.inputType === 'insertFromPaste' ||
+      event.inputType === 'insertParagraph')
+  ) {
+    save();
+  }
+}
+
+let saveInFlight = false;
+let saveQueued = false;
+let saveRetryTimer = null;
+
+function save() {
+  if (saveInFlight) {
+    saveQueued = true;
+    return;
+  }
+  attemptSave();
+}
+
+async function attemptSave() {
+  const payload = JSON.stringify(state);
+
+  if (payload === lastSavedSnapshot) {
+    return;
+  }
+
+  saveInFlight = true;
+
+  try {
+    await set(clipRef, state);
+
+    lastSavedSnapshot = payload;
+
+    pendingRemote = null;
+
+    saveBtn.classList.remove('error');
+    updateSaveIndicator();
+    flashSaved();
+
+  } catch (err) {
+    console.error('Save failed, retrying shortly:', err);
+
+    saveBtn.classList.add('error');
+    saveBtn.classList.remove('saved');
+
+    clearTimeout(saveRetryTimer);
+    saveRetryTimer = setTimeout(() => {
+      saveInFlight = false;
+      attemptSave();
+    }, 1500);
+
+    return;
+  }
+
+  saveInFlight = false;
+
+  if (saveQueued) {
+    saveQueued = false;
+    attemptSave();
+  }
+}
+
+function updateSaveIndicator() {
+  const isSaved =
+    JSON.stringify(state) === lastSavedSnapshot;
+
+  saveBtn.classList.toggle('saved', isSaved);
+}
+
+function flashSaved() {
+  saveBtn.classList.remove('pulse');
+
+  void saveBtn.offsetWidth;
+
+  saveBtn.classList.add('pulse');
+}
+
+const galleryBtn = document.getElementById('galleryBtn');
+const goToFieldBtn = document.getElementById('goToFieldBtn');
+const galleryOverlay = document.getElementById('galleryOverlay');
+const galleryGrid = document.getElementById('galleryGrid');
+const galleryEmpty = document.getElementById('galleryEmpty');
+const galleryCloseBtn = document.getElementById('galleryCloseBtn');
+const galleryAddBtn = document.getElementById('galleryAddBtn');
+const galleryAddInput = document.getElementById('galleryAddInput');
+const galleryBulkActions = document.getElementById('galleryBulkActions');
+const gallerySelectAllBtn = document.getElementById('gallerySelectAllBtn');
+const galleryDeselectAllBtn = document.getElementById('galleryDeselectAllBtn');
+const gallerySelectionBar = document.getElementById('gallerySelectionBar');
+const gallerySelectionCount = document.getElementById('gallerySelectionCount');
+const galleryDeleteSelectedBtn = document.getElementById('galleryDeleteSelectedBtn');
+const lightbox = document.getElementById('lightbox');
+const lightboxImg = document.getElementById('lightboxImg');
+const lightboxCloseBtn = document.getElementById('lightboxCloseBtn');
+
+let galleryImages = {};
+let selectedIds = new Set();
+
+function updateSelectionBar() {
+  const count = selectedIds.size;
+  gallerySelectionBar.classList.toggle('open', count > 0);
+  gallerySelectionCount.textContent = count + (count === 1 ? ' selected' : ' selected');
+}
+
+function flashGalleryButton() {
+  galleryBtn.classList.remove('pulse');
+  void galleryBtn.offsetWidth;
+  galleryBtn.classList.add('pulse');
+}
+
+function renderGallery() {
+  const allEntries = Object.entries(galleryImages || {});
+
+  const orderById = {};
+  allEntries
+    .slice()
+    .sort((a, b) => (a[1] && a[1].ts || 0) - (b[1] && b[1].ts || 0))
+    .forEach(([id], idx) => {
+      orderById[id] = idx + 1;
+    });
+
+  const entries = allEntries
+    .sort((a, b) => (a[1] && a[1].ts || 0) - (b[1] && b[1].ts || 0));
+
+  const currentIds = new Set(allEntries.map(([id]) => id));
+  selectedIds.forEach(id => {
+    if (!currentIds.has(id)) selectedIds.delete(id);
+  });
+  updateSelectionBar();
+
+  galleryGrid.innerHTML = '';
+  galleryEmpty.style.display = entries.length === 0 ? 'flex' : 'none';
+  galleryGrid.style.display = entries.length === 0 ? 'none' : 'grid';
+  galleryBulkActions.classList.toggle('visible', entries.length > 0);
+
+  entries.forEach(([id, data]) => {
+    if (!data || !data.url) return;
+
+    const labelText = 'File ' + orderById[id];
+    const fileName = data.name || (data.path ? data.path.split('/').pop() : 'Untitled');
+    const isImage = !!(data.type && data.type.startsWith('image/'));
+
+    const item = document.createElement('div');
+    item.className = 'gallery-item';
+
+    const topRow = document.createElement('div');
+    topRow.className = 'gallery-item-toprow';
+
+    const label = document.createElement('div');
+    label.className = 'gallery-item-label';
+    label.textContent = labelText;
+    topRow.appendChild(label);
+
+    const checkbox = document.createElement('input');
+    checkbox.type = 'checkbox';
+    checkbox.className = 'gallery-item-select';
+    checkbox.checked = selectedIds.has(id);
+    checkbox.setAttribute('aria-label', 'Select ' + labelText);
+    checkbox.addEventListener('click', (event) => event.stopPropagation());
+    checkbox.addEventListener('change', () => {
+      if (checkbox.checked) {
+        selectedIds.add(id);
+      } else {
+        selectedIds.delete(id);
+      }
+      updateSelectionBar();
+    });
+    topRow.appendChild(checkbox);
+
+    item.appendChild(topRow);
+
+    const filenameEl = document.createElement('div');
+    filenameEl.className = 'gallery-item-filename';
+    filenameEl.textContent = fileName;
+    filenameEl.title = fileName;
+    item.appendChild(filenameEl);
+
+    const imageWrap = document.createElement('div');
+    imageWrap.className = 'gallery-item-image-wrap';
+
+    if (isImage) {
+      const img = document.createElement('img');
+      img.src = data.url;
+      img.loading = 'lazy';
+      img.alt = fileName;
+      img.addEventListener('click', () => openLightbox(data.url, labelText));
+      imageWrap.appendChild(img);
+    } else {
+      const icon = document.createElement('div');
+      icon.className = 'gallery-item-file-icon';
+
+      const ext = fileName.includes('.') ? fileName.split('.').pop() : 'file';
+      const span = document.createElement('span');
+      span.textContent = '.' + ext;
+      icon.appendChild(span);
+
+      icon.addEventListener('click', () => window.open(data.url, '_blank'));
+      imageWrap.appendChild(icon);
+    }
+
+    const delBtn = document.createElement('button');
+    delBtn.className = 'gallery-item-delete';
+    delBtn.type = 'button';
+    delBtn.setAttribute('aria-label', 'Delete ' + labelText);
+    delBtn.textContent = '\u00d7';
+    delBtn.addEventListener('click', (event) => {
+      event.stopPropagation();
+      const confirmed = window.confirm(labelText + ' (' + fileName + ') will be permanently deleted. Continue?');
+      if (confirmed) {
+        deleteGalleryImage(id, data.path);
+      }
+    });
+    imageWrap.appendChild(delBtn);
+
+    item.appendChild(imageWrap);
+    galleryGrid.appendChild(item);
+  });
+}
+
+function openLightbox(url, labelText) {
+  lightboxImg.src = url;
+  lightboxImg.alt = labelText || '';
+  lightbox.classList.add('open');
+}
+
+function closeLightbox() {
+  lightbox.classList.remove('open');
+  lightboxImg.src = '';
+}
+
+function openGallery() {
+  galleryOverlay.classList.add('open');
+}
+
+function closeGallery() {
+  galleryOverlay.classList.remove('open');
+  closeLightbox();
+}
+
+function safeExtFromFile(file) {
+  if (file.name && file.name.includes('.')) {
+    return file.name.split('.').pop().toLowerCase();
+  }
+  if (file.type && file.type.includes('/')) {
+    return file.type.split('/')[1].split('+')[0];
+  }
+  return 'dat';
+}
+
+async function uploadImageToGallery(file) {
+  if (!file) return;
+
+  if (file.type && file.type.startsWith('video/')) {
+    window.alert('Video files aren\'t supported.');
+    return;
+  }
+
+  try {
+    const id = Date.now().toString(36) + Math.random().toString(36).slice(2, 8);
+    const ext = safeExtFromFile(file);
+    const path = 'gallery/' + id + '.' + ext;
+    const fileRef = storageRef(storage, path);
+
+    await uploadBytes(fileRef, file);
+    const url = await getDownloadURL(fileRef);
+
+    await set(dbRef(db, 'gallery/' + id), {
+      url: url,
+      path: path,
+      ts: Date.now(),
+      name: file.name || ('pasted.' + ext),
+      type: file.type || ''
+    });
+
+    flashGalleryButton();
+
+  } catch (err) {
+    console.error('File upload failed:', err);
+  }
+}
+
+async function uploadImageInline(file, el) {
+  try {
+    const id = Date.now().toString(36) + Math.random().toString(36).slice(2, 8);
+    const ext = safeExtFromFile(file);
+    const path = 'inline/' + id + '.' + ext;
+    const fileRef = storageRef(storage, path);
+
+    await uploadBytes(fileRef, file);
+    const url = await getDownloadURL(fileRef);
+
+    insertInlineImage(el, url, path);
+
+  } catch (err) {
+    console.error('Inline image upload failed:', err);
+  }
+}
+
+function insertInlineImage(el, url, path) {
+  el.focus();
+
+  const wrapper = document.createElement('span');
+  wrapper.className = 'inline-image-wrap';
+  wrapper.contentEditable = 'false';
+  wrapper.dataset.path = path;
+
+  const img = document.createElement('img');
+  img.src = url;
+  img.alt = '';
+  wrapper.appendChild(img);
+
+  const controls = document.createElement('span');
+  controls.className = 'inline-image-controls';
+
+  const addBtn = document.createElement('button');
+  addBtn.type = 'button';
+  addBtn.className = 'inline-image-btn';
+  addBtn.title = 'Add to gallery';
+  addBtn.textContent = '+';
+  addBtn.addEventListener('click', (event) => {
+    event.preventDefault();
+    addExistingImageToGallery(url, path);
+  });
+
+  const delBtn = document.createElement('button');
+  delBtn.type = 'button';
+  delBtn.className = 'inline-image-btn inline-image-del';
+  delBtn.title = 'Delete image';
+  delBtn.textContent = '\u00d7';
+  delBtn.addEventListener('click', (event) => {
+    event.preventDefault();
+    wrapper.remove();
+    handleInput(el, { inputType: 'deleteByCut' });
+    save();
+    deleteObject(storageRef(storage, path)).catch(() => {});
+  });
+
+  controls.appendChild(addBtn);
+  controls.appendChild(delBtn);
+  wrapper.appendChild(controls);
+
+  const sel = window.getSelection();
+  let range;
+  if (sel && sel.rangeCount > 0 && el.contains(sel.anchorNode)) {
+    range = sel.getRangeAt(0);
+  } else {
+    range = document.createRange();
+    range.selectNodeContents(el);
+    range.collapse(false);
+  }
+  range.deleteContents();
+  range.insertNode(wrapper);
+  range.setStartAfter(wrapper);
+  range.collapse(true);
+  sel.removeAllRanges();
+  sel.addRange(range);
+
+  handleInput(el, { inputType: 'insertFromPaste' });
+  save();
+}
+
+async function addExistingImageToGallery(url, path) {
+  try {
+    const id = Date.now().toString(36) + Math.random().toString(36).slice(2, 8);
+
+    await set(dbRef(db, 'gallery/' + id), {
+      url: url,
+      path: path,
+      ts: Date.now(),
+      name: 'pasted-image',
+      type: 'image/*'
+    });
+
+    flashGalleryButton();
+
+  } catch (err) {
+    console.error('Add to gallery failed:', err);
+  }
+}
+
+async function deleteGalleryImage(id, path) {
+  try {
+    if (path) {
+      await deleteObject(storageRef(storage, path));
+    }
+  } catch (err) {
+    console.error('Storage delete failed:', err);
+  }
+
+  try {
+    await set(dbRef(db, 'gallery/' + id), null);
+  } catch (err) {
+    console.error('Gallery entry delete failed:', err);
+  }
+}
+
+/*
+  A paste with no file attachments at all, just text or rich HTML from a
+  source like Word or a web page, is left completely alone here so the
+  browser's own contenteditable paste handles it, which is what actually
+  keeps bold, colors, and other formatting from the source.
+
+  A paste that includes an image is redirected: the image goes straight
+  into the field it was pasted into, not the gallery, with small controls
+  attached to send it to the gallery afterward or remove it.
+
+  A paste that includes a non-image file still goes to the gallery only,
+  exactly as before.
+*/
+function handleFieldPaste(event, el) {
+  const items = event.clipboardData && event.clipboardData.items;
+  if (!items) return;
+
+  const imageFiles = [];
+  const otherFiles = [];
+
+  for (const item of items) {
+    if (item.kind === 'file') {
+      const file = item.getAsFile();
+      if (!file) continue;
+      if (file.type && file.type.startsWith('image/')) {
+        imageFiles.push(file);
+      } else {
+        otherFiles.push(file);
+      }
+    }
+  }
+
+  if (imageFiles.length === 0 && otherFiles.length === 0) {
+    /*
+      Nothing came through as an actual file, but the pasted HTML from
+      the source might still reference an image by a URL that only
+      works inside that source's own page (a "blob:" or "data:" URL,
+      common when copying a mix of text and an image together). Native
+      paste already ran by the time this fires, so this just checks
+      afterward and swaps in a permanent copy if needed.
+    */
+    setTimeout(() => rescueUnreliableImages(el), 0);
+    return;
+  }
+
+  event.preventDefault();
+
+  imageFiles.forEach(file => uploadImageInline(file, el));
+
+  otherFiles.forEach(file => {
+    if (file.type && file.type.startsWith('video/')) return;
+    uploadImageToGallery(file);
+  });
+}
+
+async function rescueUnreliableImages(el) {
+  const imgs = Array.from(el.querySelectorAll('img'));
+  let changed = false;
+
+  for (const img of imgs) {
+    const src = img.getAttribute('src') || '';
+
+    if (!src.startsWith('blob:') && !src.startsWith('data:')) {
+      continue;
+    }
+
+    try {
+      const res = await fetch(src);
+      const blob = await res.blob();
+
+      const id = Date.now().toString(36) + Math.random().toString(36).slice(2, 8);
+      const ext = (blob.type && blob.type.split('/')[1] && blob.type.split('/')[1].split('+')[0]) || 'png';
+      const path = 'inline/' + id + '.' + ext;
+      const fileRef = storageRef(storage, path);
+
+      await uploadBytes(fileRef, blob);
+      const url = await getDownloadURL(fileRef);
+
+      img.src = url;
+      changed = true;
+
+    } catch (err) {
+      console.error('Could not rescue a pasted image:', err);
+    }
+  }
+
+  if (changed) {
+    handleInput(el, { inputType: 'insertFromPaste' });
+    save();
+  }
+}
+
+function startGalleryListening() {
+  onValue(galleryDbRef, (snapshot) => {
+    galleryImages = snapshot.val() || {};
+    renderGallery();
+  });
+}
+
+/*
+  Jumps straight to a specific CB by number -- useful once the list
+  has grown long enough that scrolling to find one by hand is slow.
+  Accepts the field's current position (1-indexed, matching the "CB
+  N" labels), scrolls its wrap into view, and focuses it if it's not
+  currently hidden.
+*/
+function goToField() {
+  const totalFields = elements.length;
+  if (totalFields === 0) return;
+
+  const input = window.prompt('Go to CB # (1-' + totalFields + ')');
+  if (input === null) return;
+
+  const num = parseInt(input.trim(), 10);
+  if (!Number.isFinite(num) || num < 1 || num > totalFields) {
+    window.alert('Enter a number between 1 and ' + totalFields + '.');
+    return;
+  }
+
+  const idx = num - 1;
+  const wrap = wraps[idx];
+  const el = elements[idx];
+  if (!wrap || !el) return;
+
+  wrap.scrollIntoView({ behavior: 'smooth', block: 'start' });
+
+  if (!wrap.classList.contains('collapsed')) {
+    el.focus({ preventScroll: true });
+  }
+}
+
+goToFieldBtn.addEventListener('click', goToField);
+
+galleryBtn.addEventListener('click', openGallery);
+galleryCloseBtn.addEventListener('click', closeGallery);
+lightboxCloseBtn.addEventListener('click', closeLightbox);
+lightbox.addEventListener('click', (event) => {
+  if (event.target === lightbox) closeLightbox();
+});
+galleryAddBtn.addEventListener('click', () => galleryAddInput.click());
+galleryAddInput.addEventListener('change', () => {
+  const files = Array.from(galleryAddInput.files || []);
+  files.forEach(file => uploadImageToGallery(file));
+  galleryAddInput.value = '';
+});
+
+gallerySelectAllBtn.addEventListener('click', () => {
+  Object.keys(galleryImages || {}).forEach(id => selectedIds.add(id));
+  renderGallery();
+});
+
+galleryDeselectAllBtn.addEventListener('click', () => {
+  selectedIds.clear();
+  renderGallery();
+});
+
+galleryDeleteSelectedBtn.addEventListener('click', async () => {
+  const idsToDelete = Array.from(selectedIds);
+  const count = idsToDelete.length;
+  if (count === 0) return;
+
+  const confirmed = window.confirm(
+    'Delete ' + count + (count === 1 ? ' selected file' : ' selected files') + '? This cannot be undone.'
+  );
+  if (!confirmed) return;
+
+  selectedIds.clear();
+  updateSelectionBar();
+
+  for (const id of idsToDelete) {
+    const data = galleryImages[id];
+    await deleteGalleryImage(id, data && data.path);
+  }
+});
+
+const REST_ENDPOINT =
+  'https://rtcb-81402-default-rtdb.firebaseio.com/cb.json';
+
+function flushPendingSaveOnExit() {
+  const payload = JSON.stringify(state);
+
+  if (payload === lastSavedSnapshot) {
+    return;
+  }
+
+  try {
+    fetch(REST_ENDPOINT, {
+      method: 'PUT',
+      body: payload,
+      keepalive: true
+    })
+      .then(() => {
+        saveBtn.classList.remove('error');
+        updateSaveIndicator();
+        flashSaved();
+      })
+      .catch((err) => {
+        console.error('Exit save failed:', err);
+      });
+
+    lastSavedSnapshot = payload;
+
+  } catch (err) {
+    console.error('Exit save failed:', err);
+  }
+}
+
+document.addEventListener('visibilitychange', () => {
+  if (document.hidden) {
+    flushPendingSaveOnExit();
+  }
+});
+
+window.addEventListener('pagehide', flushPendingSaveOnExit);
+window.addEventListener('beforeunload', flushPendingSaveOnExit);
+window.addEventListener('blur', flushPendingSaveOnExit);
+window.addEventListener('resize', flushPendingSaveOnExit);
+
+let lastKnownScreenX = window.screenX;
+let lastKnownScreenY = window.screenY;
+
+setInterval(() => {
+  if (window.screenX !== lastKnownScreenX || window.screenY !== lastKnownScreenY) {
+    lastKnownScreenX = window.screenX;
+    lastKnownScreenY = window.screenY;
+    flushPendingSaveOnExit();
+  }
+}, 400);
+
+setInterval(() => {
+  const isDirty = JSON.stringify(state) !== lastSavedSnapshot;
+  if (isDirty) {
+    save();
+  }
+}, 2000);
+
+function anyFieldFocused() {
+  return elements.some(el => el === document.activeElement);
+}
+
+function applyRemoteState(remote) {
+  if (!Array.isArray(remote) || remote.length === 0) {
+    remote = [{ h: '', c: false, s: false }];
+  }
+
+  if (!isHtmlEmpty(remote[remote.length - 1].h)) {
+    remote = remote.concat([{ h: '', c: false, s: false }]);
+  }
+
+  const same =
+    remote.length === state.length &&
+    remote.every((entry, index) =>
+      state[index] &&
+      entry.h === state[index].h &&
+      entry.c === state[index].c &&
+      entry.s === state[index].s
+    );
+
+  if (same) {
+    return;
+  }
+
+  state = remote.slice();
+
+  renderAll();
+
+  lastSavedSnapshot = JSON.stringify(state);
+
+  updateSaveIndicator();
+}
+
+function maybeApplyPendingRemote() {
+  setTimeout(() => {
+    if (pendingRemote && !anyFieldFocused()) {
+      const remote = pendingRemote;
+
+      pendingRemote = null;
+
+      applyRemoteState(remote);
+    }
+  }, 0);
+}
+
+function normalizeEntry(entry) {
+  if (typeof entry === 'string') {
+    return { h: entry, c: false, s: false };
+  }
+  if (entry && typeof entry === 'object') {
+    return {
+      h: typeof entry.h === 'string' ? entry.h : '',
+      c: !!entry.c,
+      s: !!entry.s
+    };
+  }
+  return { h: '', c: false, s: false };
+}
+
+function normalizeRemote(val) {
+  let arr;
+
+  if (Array.isArray(val)) {
+    arr = val;
+  } else if (val && typeof val === 'object') {
+    arr = Object.keys(val)
+      .sort((a, b) => Number(a) - Number(b))
+      .map(key => val[key]);
+  } else {
+    arr = [''];
+  }
+
+  return arr.map(normalizeEntry);
+}
+
+function startListening() {
+  onValue(clipRef, (snapshot) => {
+    const remote = normalizeRemote(snapshot.val());
+
+    const localIsDirty =
+      JSON.stringify(state) !== lastSavedSnapshot;
+
+    if (!localIsDirty) {
+      pendingRemote = null;
+      applyRemoteState(remote);
+      return;
+    }
+
+    pendingRemote = remote;
+  });
+}
+
+function initApp() {
+  renderAll();
+
+  startListening();
+  startGalleryListening();
+
+  saveBtn.style.display = 'flex';
+  galleryBtn.style.display = 'flex';
+  goToFieldBtn.style.display = 'flex';
+
+  updateSaveIndicator();
+
+  saveBtn.addEventListener('click', save);
+
+  document.addEventListener('keydown', (event) => {
+    const key = event.key.toLowerCase();
+
+    if ((event.ctrlKey || event.metaKey) && key === 's') {
+      event.preventDefault();
+      save();
+    } else if (event.key === 'Enter') {
+      save();
+    }
+  });
+}
+
+const PIN_HASH =
+  'f98204ba6963009734f0398a80f8e44f9d3ef74ebb9c49e5d4f000bd1c102d29';
+
+const lock = document.getElementById('lock');
+const pinInput = document.getElementById('pinInput');
+
+async function sha256Hex(text) {
+  const bytes = new TextEncoder().encode(text);
+
+  const hashBuffer =
+    await crypto.subtle.digest('SHA-256', bytes);
+
+  return Array.from(new Uint8Array(hashBuffer))
+    .map(b => b.toString(16).padStart(2, '0'))
+    .join('');
+}
+
+pinInput.addEventListener('input', async () => {
+  const hash = await sha256Hex(pinInput.value);
+
+  if (hash === PIN_HASH) {
+    lock.style.display = 'none';
+
+    pinInput.blur();
+
+    initApp();
+  }
+});
+
+pinInput.focus();
+</script>
+
+</body>
+</html>
